@@ -482,12 +482,13 @@
         if (bErr) throw bErr;
         billId = bill.id;
 
-        await db.from('guests').insert({
+        const { error: gErr } = await db.from('guests').insert({
           bill_id:            billId,
           name:               user.name,
           phone:              user.phone,
           device_fingerprint: Auth.getFingerprint(),
         });
+        if (gErr) throw gErr;
       } else {
         await db.from('bills').update({
           name,
@@ -518,7 +519,8 @@
 
     } catch (err) {
       console.error(err);
-      showToast('Failed to save — please try again', 'error');
+      const msg = err?.message || err?.code || err?.details || JSON.stringify(err) || 'unknown';
+      showToast(`Save failed: ${msg}`, 'error', 8000);
       btn.disabled    = false;
       btn.textContent = 'Share Bill →';
     }
