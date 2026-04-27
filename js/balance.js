@@ -22,7 +22,8 @@ const Balance = (() => {
       net[phone][currency] = (net[phone][currency] || 0) + amount;
     }
 
-    // Expenses: payer is owed back (positive), split members owe (negative)
+    // Expenses: payer is owed back (positive), split members owe (negative).
+    // Invariant: splits include ALL members (payer included) and sum to exp.amount.
     for (const exp of expenses) {
       addNet(exp.paid_by, exp.currency, exp.amount);
       for (const split of (exp.splits || [])) {
@@ -30,7 +31,8 @@ const Balance = (() => {
       }
     }
 
-    // Bills: bill payer is owed back, each member's share is their debt
+    // Bills: bill payer is owed back, each member's share is their debt.
+    // Invariant: memberShares include ALL members and sum to grand_total.
     for (const bill of bills) {
       if (!bill.paid_by_phone) continue;
       addNet(bill.paid_by_phone, bill.currency, bill.grand_total);
@@ -60,7 +62,8 @@ const Balance = (() => {
         breakdown.push({ currency, amount, usdAmount, rateAvailable: rate !== null });
       }
 
-      return { phone: m.phone, display_name: m.display_name, usdNet, breakdown };
+      const partial = breakdown.some(b => !b.rateAvailable);
+      return { phone: m.phone, display_name: m.display_name, usdNet, breakdown, partial };
     });
   }
 
@@ -70,7 +73,7 @@ const Balance = (() => {
     const nonUSD = [...new Set(currencies.filter(c => c && c !== 'USD'))];
     const entries = await Promise.all(
       nonUSD.map(async c => {
-        const rate = await getExchangeRate(c, 'USD');
+        const rate = await getExchangeRate(c, 'USD').catch(() => null);
         return [c, rate];
       })
     );
