@@ -208,7 +208,11 @@
       uploadArea.classList.remove('drag-over');
       handleFile(e.dataTransfer.files[0]);
     });
-    fileInput.addEventListener('change', e => handleFile(e.target.files[0]));
+    fileInput.addEventListener('change', e => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = ''; // reset so same file can be re-selected after an error
+      if (file) handleFile(file);
+    });
 
     $('add-item-btn').addEventListener('click', addBlankItem);
 
@@ -254,7 +258,9 @@
 
   // ── File handling + OCR ───────────────────────────────────
   async function handleFile(file) {
-    if (!file || !file.type.startsWith('image/')) {
+    if (!file) return;
+    // Some mobile browsers return empty MIME type for HEIC/gallery picks — allow those through
+    if (file.type && !file.type.startsWith('image/')) {
       showToast('Please upload an image file', 'error');
       return;
     }
@@ -266,11 +272,21 @@
     hide($('upload-area'));
 
     try {
-      const base64 = await compressImage(file);
-      const res    = await fetch('/api/parse-receipt', {
+      let base64, mediaType;
+      try {
+        base64    = await compressImage(file);
+        mediaType = 'image/jpeg';
+      } catch (compressErr) {
+        // Canvas can't decode HEIC on some browsers — send raw
+        console.warn('Compression failed, sending raw:', compressErr);
+        base64    = await fileToBase64(file);
+        mediaType = file.type || 'image/jpeg';
+      }
+
+      const res = await fetch('/api/parse-receipt', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ image: base64, mediaType: 'image/jpeg' }),
+        body:    JSON.stringify({ image: base64, mediaType }),
       });
 
       if (!res.ok) {
@@ -334,6 +350,15 @@
       };
       img.onerror = reject;
       img.src = url;
+    });
+  }
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload  = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
     });
   }
 
