@@ -414,14 +414,21 @@ h3 { font-size: 18px; }
 }
 .tip-custom .input { max-width: 80px; text-align: center; }
 .toggle-group {
-  display: flex;
+  display: inline-flex;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+/* Split method toggle — scrollable for 5 buttons */
+.split-method-toggle {
+  display: flex;
+  width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-  background: var(--surface-2);
-  width: 100%;
+  scrollbar-width: none;
 }
+.split-method-toggle::-webkit-scrollbar { display: none; }
 .toggle-btn {
   padding: 8px 16px;
   border: none;
