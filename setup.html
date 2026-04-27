@@ -273,7 +273,11 @@
         body:    JSON.stringify({ image: base64, mediaType: 'image/jpeg' }),
       });
 
-      if (!res.ok) throw new Error('OCR failed');
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        console.error('OCR error', res.status, errText);
+        throw new Error(`Server error ${res.status}`);
+      }
       const data = await res.json();
       if (data.error) throw new Error(data.error);
 
@@ -303,9 +307,10 @@
       showToast('Receipt scanned!', 'success');
 
     } catch (err) {
-      console.error(err);
-      showToast('Could not read receipt — add items manually', 'error');
+      console.error('Receipt scan failed:', err);
+      hide(preview);
       show($('upload-area'));
+      showToast(`Scan failed: ${err.message || 'unknown error'} — add items manually`, 'error');
       showPostUploadSections();
     } finally {
       hide($('processing-state'));

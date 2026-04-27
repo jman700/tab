@@ -299,6 +299,7 @@ h3 { font-size: 18px; }
 
 /* ── Upload Area ─────────────────────────────────────────────── */
 .upload-area {
+  display: block;
   border: 1.5px dashed var(--border-strong);
   border-radius: var(--radius);
   padding: 36px 24px;
@@ -725,7 +726,7 @@ h3 { font-size: 18px; }
 }
 
 /* ── Dashboard ─────────────────────────────────────────────── */
-.dash-page { padding: 24px 0 100px; }
+.dash-page { padding-top: 24px; padding-bottom: 100px; }
 .dash-head {
   display: flex;
   align-items: flex-start;
