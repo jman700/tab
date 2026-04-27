@@ -853,6 +853,7 @@
     } else if (activeSplitMethod === 'adjustment') {
       const inputs   = [...$$('.split-adj-input')];
       const n        = inputs.length;
+      if (n === 0) { showToast('No members to split between', 'error'); return; }
       const totalAdj = inputs.reduce((s, el) => s + (parseFloat(el.value) || 0), 0);
       if (totalAdj > amount + 0.005) {
         showToast(`Adjustments exceed total by ${fmtCurrency((totalAdj - amount).toFixed(2), currency)}`, 'error');
