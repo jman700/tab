@@ -33,73 +33,87 @@
 
 <main class="container dash-page page" id="main">
 
-  <div class="dash-head">
-    <div>
-      <h1>Your Bills</h1>
-      <p id="dash-subtitle" class="mt-4">&nbsp;</p>
-    </div>
-    <button class="btn btn-primary" id="new-bill-btn" style="flex-shrink:0;">
-      + New Bill
-    </button>
+  <!-- Tab bar -->
+  <div class="dash-tab-bar" id="dash-tabs">
+    <button class="dash-tab active" data-tab="bills">Bills</button>
+    <button class="dash-tab"        data-tab="groups">Groups</button>
   </div>
 
-  <!-- Active Bills -->
-  <div id="active-section">
-    <div class="section-divider"><h2>Active</h2></div>
-    <div id="active-bills" aria-live="polite">
-      <!-- skeleton shown while loading -->
-      <div class="bill-card-skeleton">
-        <div class="skeleton" style="height:18px;width:55%;margin-bottom:10px;"></div>
-        <div class="skeleton" style="height:13px;width:38%;margin-bottom:14px;"></div>
-        <div style="border-top:1px solid var(--border);padding-top:12px;display:flex;justify-content:space-between;">
-          <div class="skeleton" style="height:13px;width:30%;"></div>
-          <div class="skeleton" style="height:18px;width:18%;"></div>
+  <!-- ── Bills pane ─────────────────────────────────────── -->
+  <div id="tab-bills">
+    <div class="dash-head">
+      <div>
+        <h1>Your Bills</h1>
+        <p id="dash-subtitle" class="mt-4">&nbsp;</p>
+      </div>
+      <button class="btn btn-primary" id="new-bill-btn" style="flex-shrink:0;">
+        + New Bill
+      </button>
+    </div>
+
+    <!-- Active Bills -->
+    <div id="active-section">
+      <div class="section-divider"><h2>Active</h2></div>
+      <div id="active-bills" aria-live="polite">
+        <!-- skeleton shown while loading -->
+        <div class="bill-card-skeleton">
+          <div class="skeleton" style="height:18px;width:55%;margin-bottom:10px;"></div>
+          <div class="skeleton" style="height:13px;width:38%;margin-bottom:14px;"></div>
+          <div style="border-top:1px solid var(--border);padding-top:12px;display:flex;justify-content:space-between;">
+            <div class="skeleton" style="height:13px;width:30%;"></div>
+            <div class="skeleton" style="height:18px;width:18%;"></div>
+          </div>
+        </div>
+        <div class="bill-card-skeleton mt-8">
+          <div class="skeleton" style="height:18px;width:45%;margin-bottom:10px;"></div>
+          <div class="skeleton" style="height:13px;width:30%;margin-bottom:14px;"></div>
+          <div style="border-top:1px solid var(--border);padding-top:12px;display:flex;justify-content:space-between;">
+            <div class="skeleton" style="height:13px;width:25%;"></div>
+            <div class="skeleton" style="height:18px;width:20%;"></div>
+          </div>
         </div>
       </div>
-      <div class="bill-card-skeleton mt-8">
-        <div class="skeleton" style="height:18px;width:45%;margin-bottom:10px;"></div>
-        <div class="skeleton" style="height:13px;width:30%;margin-bottom:14px;"></div>
-        <div style="border-top:1px solid var(--border);padding-top:12px;display:flex;justify-content:space-between;">
-          <div class="skeleton" style="height:13px;width:25%;"></div>
-          <div class="skeleton" style="height:18px;width:20%;"></div>
-        </div>
+    </div>
+
+    <!-- Closed Bills (accordion) -->
+    <div id="closed-section" class="mt-24">
+      <div class="section-divider">
+        <h2 class="accordion-head" id="closed-accordion-head">
+          Closed<span class="accordion-count" id="closed-count"></span>
+          <span class="accordion-chevron" id="closed-chevron">›</span>
+        </h2>
       </div>
+      <div class="accordion-body" id="closed-bills"></div>
     </div>
-  </div>
+  </div><!-- /tab-bills -->
 
-  <!-- Closed Bills (accordion) -->
-  <div id="closed-section" class="mt-24">
-    <div class="section-divider">
-      <h2 class="accordion-head" id="closed-accordion-head">
-        Closed<span class="accordion-count" id="closed-count"></span>
-        <span class="accordion-chevron" id="closed-chevron">›</span>
-      </h2>
+  <!-- ── Groups pane ────────────────────────────────────── -->
+  <div id="tab-groups" style="display:none;">
+    <div class="dash-head">
+      <h1>Groups</h1>
+      <button class="btn btn-primary" id="new-group-btn" style="flex-shrink:0;">
+        + New Group
+      </button>
     </div>
-    <div class="accordion-body" id="closed-bills"></div>
-  </div>
 
-  <!-- Active Groups -->
-  <div id="groups-section" class="mt-24">
-    <div class="section-divider"><h2>Groups</h2></div>
-    <button class="btn btn-primary btn-full" style="margin-bottom:12px;" id="new-group-btn">+ New Group</button>
     <div id="groups-list">
       <div class="bill-card-skeleton">
         <div class="skeleton" style="height:18px;width:45%;margin-bottom:10px;"></div>
         <div class="skeleton" style="height:13px;width:28%;"></div>
       </div>
     </div>
-  </div>
 
-  <!-- Closed Groups (accordion) -->
-  <div id="closed-groups-section" class="mt-24" style="display:none;">
-    <div class="section-divider">
-      <h2 class="accordion-head" id="closed-groups-head">
-        Closed Groups<span class="accordion-count" id="closed-groups-count"></span>
-        <span class="accordion-chevron" id="closed-groups-chevron">›</span>
-      </h2>
+    <!-- Closed Groups (accordion) -->
+    <div id="closed-groups-section" class="mt-24" style="display:none;">
+      <div class="section-divider">
+        <h2 class="accordion-head" id="closed-groups-head">
+          Closed Groups<span class="accordion-count" id="closed-groups-count"></span>
+          <span class="accordion-chevron" id="closed-groups-chevron">›</span>
+        </h2>
+      </div>
+      <div class="accordion-body" id="closed-groups-list"></div>
     </div>
-    <div class="accordion-body" id="closed-groups-list"></div>
-  </div>
+  </div><!-- /tab-groups -->
 
 </main>
 
