@@ -281,6 +281,7 @@
   async function loadGroups() {
     const { data, error } = await Groups.getMyGroups(user.phone);
     if (error) {
+      console.error('loadGroups failed:', error);
       setHTML('groups-list', '<p style="font-size:14px;color:var(--text-muted);">Could not load groups.</p>');
       return;
     }
@@ -295,14 +296,14 @@
       return;
     }
     setHTML('groups-list', data.map(renderGroupCard).join(''));
-    $$('.group-card').forEach(card => {
+    [...$('groups-list').querySelectorAll('.group-card')].forEach(card => {
       card.addEventListener('click', () => navigateTo(`/group.html?id=${card.dataset.id}`));
     });
   }
 
   function renderGroupCard(group) {
     return `
-      <div class="bill-card fade-up group-card" data-id="${group.id}" style="cursor:pointer;">
+      <div class="bill-card fade-up group-card" data-id="${escHtml(group.id)}" style="cursor:pointer;">
         <div class="bill-card-top">
           <div class="bill-card-name">${escHtml(group.name)}</div>
           <span class="badge badge-active">Group</span>
