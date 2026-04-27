@@ -111,7 +111,7 @@
 
   <div class="field">
     <label for="exp-date">Date <span style="font-size:11px;font-weight:400;color:var(--text-muted);">(required)</span></label>
-    <input class="input" id="exp-date" type="date" />
+    <input class="input" id="exp-date" type="date" required />
   </div>
 
   <div class="field">
@@ -860,7 +860,7 @@
       }
     } else if (activeSplitMethod === 'adjustment') {
       const inputs   = [...$$('.split-adj-input')];
-      const n        = inputs.length;
+      const n        = includedAtSave.length;
       if (n === 0) { showToast('No members to split between', 'error'); return; }
       const totalAdj = inputs.reduce((s, el) => s + (parseFloat(el.value) || 0), 0);
       if (totalAdj > amount + 0.005) {
