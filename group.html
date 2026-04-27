@@ -119,6 +119,11 @@
     <select class="input" id="exp-paid-by" style="cursor:pointer;"></select>
   </div>
 
+  <div class="field" id="participant-group">
+    <label>Who's splitting this?</label>
+    <div id="participant-list" class="participant-list"></div>
+  </div>
+
   <div class="field">
     <label>Split</label>
     <div class="toggle-group" style="display:flex;width:100%;margin-top:6px;">
@@ -499,6 +504,39 @@
   }
 
   // ── Add Expense Sheet ─────────────────────────────────────
+  function getIncludedMembers() {
+    const checked = [...$$('#participant-list .participant-cb')]
+      .filter(cb => cb.checked)
+      .map(cb => cb.dataset.phone);
+    // Return full member objects in original members order (for color/index consistency)
+    return members.filter(m => checked.includes(m.phone));
+  }
+
+  function renderParticipants() {
+    const list   = $('participant-list');
+    const paidBy = $('exp-paid-by').value;
+    list.innerHTML = members.map(m => {
+      const isPayer = m.phone === paidBy;
+      return `
+        <label class="participant-row">
+          <input type="checkbox" class="participant-cb" data-phone="${escHtml(m.phone)}"
+            ${isPayer ? 'checked disabled' : 'checked'}>
+          <span class="participant-name">${escHtml(m.display_name)}</span>
+          <span class="participant-phone">${escHtml(Auth.formatPhone(m.phone))}</span>
+        </label>`;
+    }).join('');
+  }
+
+  $('participant-list').addEventListener('change', e => {
+    if (!e.target.classList.contains('participant-cb')) return;
+    const checked = $$('#participant-list .participant-cb:checked');
+    if (checked.length === 0) {
+      e.target.checked = true; // prevent unchecking the last person
+      return;
+    }
+    renderSplitInputs();
+  });
+
   function populateCurrencySelect() {
     $('exp-currency').innerHTML = CURRENCIES.map(c =>
       `<option value="${c.code}"${c.code === 'USD' ? ' selected' : ''}>${c.code}</option>`
@@ -515,53 +553,62 @@
     const method   = activeSplitMethod;
     const amount   = parseFloat($('exp-amount').value) || 0;
     const currency = $('exp-currency').value || 'USD';
+    const included = getIncludedMembers();
+    const n        = included.length;
 
     if (method === 'equal') {
-      const each = members.length > 0 ? (amount / members.length) : 0;
+      const each = n > 0 ? (amount / n) : 0;
       setHTML('split-inputs', `
         <p style="font-size:13px;color:var(--text-muted);padding:4px 0;">
-          ${fmtCurrency(each.toFixed(2), currency)} per person · ${members.length} member${members.length !== 1 ? 's' : ''}
+          ${fmtCurrency(each.toFixed(2), currency)} per person · ${n} member${n !== 1 ? 's' : ''}
         </p>
       `);
       return;
     }
 
     if (method === 'percentage') {
-      const even      = members.length > 0 ? Math.floor(100 / members.length) : 0;
-      const remainder = 100 - (even * members.length);
-      setHTML('split-inputs', members.map((m, i) => `
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-          <div style="width:28px;height:28px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;background:${getPersonColor(i)}22;color:${getPersonColor(i)};border:1.5px solid ${getPersonColor(i)}44;">
-            ${escHtml(getInitials(m.display_name))}
-          </div>
-          <span style="flex:1;font-size:14px;">${escHtml(m.display_name)}</span>
-          <input class="input split-pct-input" data-phone="${escHtml(m.phone)}" type="number" min="0" max="100" step="1"
-            value="${even + (i === 0 ? remainder : 0)}"
-            style="width:68px;padding:6px 8px;text-align:right;font-size:14px;" />
-          <span style="font-size:13px;color:var(--text-muted);">%</span>
-        </div>
-      `).join('') + `<p id="pct-sum-note" style="font-size:12px;color:var(--text-muted);margin-top:2px;"></p>`);
+      const even      = n > 0 ? Math.floor(100 / n) : 0;
+      const remainder = 100 - (even * n);
+      setHTML('split-inputs', included.map((m, localIdx) => {
+        const colorIdx = members.indexOf(m);
+        return `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <div style="width:28px;height:28px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;background:${getPersonColor(colorIdx)}22;color:${getPersonColor(colorIdx)};border:1.5px solid ${getPersonColor(colorIdx)}44;">
+              ${escHtml(getInitials(m.display_name))}
+            </div>
+            <span style="flex:1;font-size:14px;">${escHtml(m.display_name)}</span>
+            <input class="input split-pct-input" data-phone="${escHtml(m.phone)}" type="number" min="0" max="100" step="1"
+              value="${even + (localIdx === 0 ? remainder : 0)}"
+              style="width:68px;padding:6px 8px;text-align:right;font-size:14px;" />
+            <span style="font-size:13px;color:var(--text-muted);">%</span>
+          </div>`;
+      }).join('') + `<p id="pct-sum-note" style="font-size:12px;color:var(--text-muted);margin-top:2px;"></p>`);
       $$('.split-pct-input').forEach(el => el.addEventListener('input', updatePctNote));
       updatePctNote();
       return;
     }
 
     if (method === 'exact') {
-      const each = members.length > 0 ? (amount / members.length).toFixed(2) : '0.00';
-      setHTML('split-inputs', members.map((m, i) => `
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-          <div style="width:28px;height:28px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;background:${getPersonColor(i)}22;color:${getPersonColor(i)};border:1.5px solid ${getPersonColor(i)}44;">
-            ${escHtml(getInitials(m.display_name))}
-          </div>
-          <span style="flex:1;font-size:14px;">${escHtml(m.display_name)}</span>
-          <input class="input split-exact-input" data-phone="${escHtml(m.phone)}" type="number" inputmode="decimal" min="0" step="0.01"
-            value="${each}"
-            style="width:90px;padding:6px 8px;text-align:right;font-size:14px;" />
-        </div>
-      `).join('') + `<p id="exact-sum-note" style="font-size:12px;color:var(--text-muted);margin-top:2px;"></p>`);
+      const each = n > 0 ? (amount / n).toFixed(2) : '0.00';
+      setHTML('split-inputs', included.map(m => {
+        const colorIdx = members.indexOf(m);
+        return `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <div style="width:28px;height:28px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;background:${getPersonColor(colorIdx)}22;color:${getPersonColor(colorIdx)};border:1.5px solid ${getPersonColor(colorIdx)}44;">
+              ${escHtml(getInitials(m.display_name))}
+            </div>
+            <span style="flex:1;font-size:14px;">${escHtml(m.display_name)}</span>
+            <input class="input split-exact-input" data-phone="${escHtml(m.phone)}" type="number" inputmode="decimal" min="0" step="0.01"
+              value="${each}"
+              style="width:90px;padding:6px 8px;text-align:right;font-size:14px;" />
+          </div>`;
+      }).join('') + `<p id="exact-sum-note" style="font-size:12px;color:var(--text-muted);margin-top:2px;"></p>`);
       $$('.split-exact-input').forEach(el => el.addEventListener('input', updateExactNote));
       updateExactNote();
+      return;
     }
+
+    // 'shares' and 'adjustment' cases added in Tasks 6 & 7
   }
 
   function updatePctNote() {
@@ -597,6 +644,11 @@
   $('exp-amount').addEventListener('input', renderSplitInputs);
   $('exp-currency').addEventListener('change', renderSplitInputs);
 
+  $('exp-paid-by').addEventListener('change', () => {
+    renderParticipants();
+    renderSplitInputs();
+  });
+
   $('add-expense-btn').addEventListener('click', () => {
     populateCurrencySelect();
     populatePaidBySelect();
@@ -610,6 +662,7 @@
     $('exp-scan-input').value  = '';
     $('exp-scanning-state').style.display = 'none';
     $('exp-items-preview').style.display  = 'none';
+    renderParticipants();
     renderSplitInputs();
     openSheet('expense-backdrop', 'expense-sheet');
     setTimeout(() => $('exp-description').focus(), 320);
@@ -635,8 +688,10 @@
     let splits = [];
 
     if (activeSplitMethod === 'equal') {
-      const baseShare = Math.floor((amount / members.length) * 100) / 100;
-      splits = members.map(m => ({ phone: m.phone, amount: baseShare }));
+      const included  = getIncludedMembers();
+      const n         = included.length;
+      const baseShare = Math.floor((amount / n) * 100) / 100;
+      splits = included.map(m => ({ phone: m.phone, amount: baseShare }));
       const sum  = splits.reduce((s, x) => s + x.amount, 0);
       const diff = parseFloat((amount - sum).toFixed(2));
       if (Math.abs(diff) > 0) {
