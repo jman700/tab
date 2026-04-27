@@ -84,6 +84,7 @@ const Balance = (() => {
   // Input: output of toUSD() — [{ phone, display_name, usdNet, ... }]
   // Output: [{ from: phone, fromName, to: phone, toName, amount }]
   function simplify(members) {
+    if (members.length < 2) return [];
     // Work with cents to avoid floating-point drift
     const balances = members.map(m => ({
       phone: m.phone,
