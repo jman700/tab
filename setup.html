@@ -575,7 +575,8 @@
       const grand           = subtotal + tax + tip;
 
       // Upload any new photos to Supabase Storage
-      const receiptUrls = [...existingReceiptUrls];
+      const receiptUrls  = [...existingReceiptUrls];
+      let   uploadErrors = 0;
       for (let i = 0; i < photos.length; i++) {
         try {
           let blob;
@@ -586,17 +587,24 @@
             blob = photos[i].file;
           }
           const path = `${billId}/${existingReceiptUrls.length + i}.jpg`;
-          const { error: upErr } = await db.storage.from('receipts').upload(path, blob, {
+          const { data: upData, error: upErr } = await db.storage.from('receipts').upload(path, blob, {
             contentType: 'image/jpeg',
             upsert: true,
           });
-          if (!upErr) {
+          if (upErr) {
+            console.error('Storage upload error:', JSON.stringify(upErr));
+            uploadErrors++;
+          } else {
             const { data: urlData } = db.storage.from('receipts').getPublicUrl(path);
             receiptUrls.push(urlData.publicUrl);
           }
         } catch (e) {
-          console.warn('Photo upload failed for photo', i, e);
+          console.error('Photo upload exception for photo', i, e);
+          uploadErrors++;
         }
+      }
+      if (uploadErrors > 0 && receiptUrls.length === existingReceiptUrls.length) {
+        showToast('Receipt photos could not be saved — check browser console for details', 'error', 6000);
       }
 
       const billPayload = {

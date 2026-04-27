@@ -98,9 +98,19 @@ CREATE POLICY "public_all" ON tab.claims FOR ALL USING (true) WITH CHECK (true);
 ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS currency      TEXT    DEFAULT 'USD';
 ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS receipt_urls TEXT[]  DEFAULT '{}';
 
--- Storage bucket (run in Supabase dashboard → Storage, or via SQL):
--- 1. Create a bucket named "receipts" and set it to Public.
--- 2. No extra RLS needed for a public bucket.
+-- Storage bucket setup:
+-- 1. Create a bucket named "receipts" and set it to Public (allows public reads).
+-- 2. Run these policies so the anon key can upload from the browser:
+INSERT INTO storage.buckets (id, name, public) VALUES ('receipts', 'receipts', true)
+  ON CONFLICT (id) DO UPDATE SET public = true;
+
+CREATE POLICY "receipts_anon_insert" ON storage.objects
+  FOR INSERT TO anon
+  WITH CHECK (bucket_id = 'receipts');
+
+CREATE POLICY "receipts_anon_select" ON storage.objects
+  FOR SELECT TO anon
+  USING (bucket_id = 'receipts');
 
 -- ── Realtime ─────────────────────────────────────────────────
 -- Run these three lines in a separate query after the tables are created.
