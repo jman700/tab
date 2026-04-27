@@ -47,10 +47,10 @@ async function getExchangeRate(from, to) {
   const key = `${from}_${to}`;
   if (_rateCache[key]) return _rateCache[key];
   try {
-    const res  = await fetch(`https://api.frankfurter.app/latest?from=${from}&to=${to}`);
+    const res  = await fetch(`/api/exchange-rate?from=${from}&to=${to}`);
     if (!res.ok) return null;
     const data = await res.json();
-    const rate = data.rates?.[to];
+    const rate = data.rate;
     if (rate) _rateCache[key] = rate;
     return rate || null;
   } catch {
