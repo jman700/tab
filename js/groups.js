@@ -141,6 +141,46 @@ const Groups = (() => {
     return { data: true };
   }
 
+  async function getBillsForGroup(groupId) {
+    const { data: bills, error: e1 } = await db
+      .from('bills')
+      .select('*')
+      .eq('group_id', groupId)
+      .order('created_at', { ascending: false });
+    if (e1) return { error: e1 };
+    if (!bills || bills.length === 0) return { data: [] };
+
+    const billIds = bills.map(b => b.id);
+
+    const [{ data: allClaims, error: e2 }, { data: allItems, error: e3 }, { data: allGuests, error: e4 }] =
+      await Promise.all([
+        db.from('claims').select('*').in('bill_id', billIds),
+        db.from('items').select('*').in('bill_id', billIds),
+        db.from('guests').select('*').in('bill_id', billIds),
+      ]);
+    if (e2 || e3 || e4) return { error: e2 || e3 || e4 };
+
+    const claimsByBill = {};
+    const itemsByBill  = {};
+    const guestsByBill = {};
+    (allClaims || []).forEach(c => { if (!claimsByBill[c.bill_id]) claimsByBill[c.bill_id] = []; claimsByBill[c.bill_id].push(c); });
+    (allItems  || []).forEach(i => { if (!itemsByBill[i.bill_id])  itemsByBill[i.bill_id]  = []; itemsByBill[i.bill_id].push(i); });
+    (allGuests || []).forEach(g => { if (!guestsByBill[g.bill_id]) guestsByBill[g.bill_id] = []; guestsByBill[g.bill_id].push(g); });
+
+    return {
+      data: bills.map(bill => {
+        const claims = claimsByBill[bill.id] || [];
+        const items  = itemsByBill[bill.id]  || [];
+        const guests = guestsByBill[bill.id] || [];
+        const memberShares = guests.map(g => ({
+          phone:  g.phone,
+          amount: getPersonShare(g.phone, claims, items, guests, bill),
+        }));
+        return { ...bill, memberShares };
+      }),
+    };
+  }
+
   return {
     createGroup,
     getMyGroups,
@@ -150,5 +190,6 @@ const Groups = (() => {
     addExpense,
     getExpenses,
     deleteExpense,
+    getBillsForGroup,
   };
 })();
