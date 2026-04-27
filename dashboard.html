@@ -78,12 +78,42 @@
     <div class="accordion-body" id="closed-bills"></div>
   </div>
 
+  <!-- Groups -->
+  <div id="groups-section" class="mt-24">
+    <div class="dash-head" style="margin-bottom:12px;">
+      <div class="section-divider" style="margin:0;flex:1;"><h2>Groups</h2></div>
+      <button class="btn btn-secondary btn-sm" id="new-group-btn" style="flex-shrink:0;">+ New Group</button>
+    </div>
+    <div id="groups-list">
+      <div class="bill-card-skeleton">
+        <div class="skeleton" style="height:18px;width:45%;margin-bottom:10px;"></div>
+        <div class="skeleton" style="height:13px;width:28%;"></div>
+      </div>
+    </div>
+  </div>
+
 </main>
+
+<!-- New Group Sheet -->
+<div class="sheet-backdrop" id="new-group-backdrop" style="display:none;"></div>
+<div class="sheet" id="new-group-sheet" style="display:none;">
+  <div class="sheet-handle"></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <h2 style="margin:0;">New Group</h2>
+    <button class="btn btn-ghost btn-sm" id="close-new-group-btn">✕</button>
+  </div>
+  <div class="field">
+    <label for="group-name-input">Group Name</label>
+    <input class="input" id="group-name-input" type="text" placeholder="Trip to Mexico, Apartment…" autocomplete="off" />
+  </div>
+  <button class="btn btn-primary btn-full mt-16" id="create-group-btn">Create Group</button>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="/js/config.js"></script>
 <script src="/js/auth.js"></script>
 <script src="/js/utils.js"></script>
+<script src="/js/groups.js"></script>
 <script>
   const user = Auth.requireAuth();
   if (!user) throw new Error('Not authenticated');
@@ -246,6 +276,77 @@
   }
 
   loadBills();
+
+  // ── Groups ───────────────────────────────────────────────
+  async function loadGroups() {
+    const { data, error } = await Groups.getMyGroups(user.phone);
+    if (error) {
+      setHTML('groups-list', '<p style="font-size:14px;color:var(--text-muted);">Could not load groups.</p>');
+      return;
+    }
+    if (!data || data.length === 0) {
+      setHTML('groups-list', `
+        <div class="empty">
+          <div class="empty-icon">👥</div>
+          <h3>No groups yet</h3>
+          <p>Create a group to track shared expenses over time.</p>
+        </div>
+      `);
+      return;
+    }
+    setHTML('groups-list', data.map(renderGroupCard).join(''));
+    $$('.group-card').forEach(card => {
+      card.addEventListener('click', () => navigateTo(`/group.html?id=${card.dataset.id}`));
+    });
+  }
+
+  function renderGroupCard(group) {
+    return `
+      <div class="bill-card fade-up group-card" data-id="${group.id}" style="cursor:pointer;">
+        <div class="bill-card-top">
+          <div class="bill-card-name">${escHtml(group.name)}</div>
+          <span class="badge badge-active">Group</span>
+        </div>
+        <div class="bill-card-meta">
+          <span>Created ${formatDateShort(group.created_at)}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // New Group sheet
+  $('new-group-btn').addEventListener('click', () => {
+    $('group-name-input').value = '';
+    openSheet('new-group-backdrop', 'new-group-sheet');
+    setTimeout(() => $('group-name-input').focus(), 320);
+  });
+  $('close-new-group-btn').addEventListener('click', () => closeSheet('new-group-backdrop', 'new-group-sheet'));
+  $('new-group-backdrop').addEventListener('click', () => closeSheet('new-group-backdrop', 'new-group-sheet'));
+
+  $('create-group-btn').addEventListener('click', async () => {
+    const name = $('group-name-input').value.trim();
+    if (!name) { showToast('Enter a group name', 'error'); return; }
+
+    const btn = $('create-group-btn');
+    btn.disabled = true;
+    btn.textContent = 'Creating…';
+
+    const { data, error } = await Groups.createGroup(name, user.phone, user.name);
+
+    btn.disabled = false;
+    btn.textContent = 'Create Group';
+
+    if (error) { showToast('Could not create group', 'error'); return; }
+
+    closeSheet('new-group-backdrop', 'new-group-sheet');
+    navigateTo(`/group.html?id=${data.id}`);
+  });
+
+  $('group-name-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') $('create-group-btn').click();
+  });
+
+  loadGroups();
 
   (async () => {
     const { data } = await db.from('users').select('is_admin').eq('phone', user.phone).single();
