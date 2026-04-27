@@ -400,23 +400,23 @@
   loadGroups();
 
   // ── Tab switching ─────────────────────────────────────────
-  function switchDashTab(tab) {
+  function switchDashTab(tab, updateHash = true) {
     $('tab-bills').style.display  = tab === 'bills'  ? '' : 'none';
     $('tab-groups').style.display = tab === 'groups' ? '' : 'none';
     $$('.dash-tab').forEach(btn =>
       btn.classList.toggle('active', btn.dataset.tab === tab)
     );
-    history.replaceState(null, '', '#' + tab);
+    if (updateHash) history.replaceState(null, '', '#' + tab);
   }
 
   $$('.dash-tab').forEach(btn =>
     btn.addEventListener('click', () => switchDashTab(btn.dataset.tab))
   );
 
-  // Restore tab from URL hash on load
+  // Restore tab from URL hash on load; don't pollute URL if no hash was present
   const initialTab = ['bills', 'groups'].includes(location.hash.slice(1))
     ? location.hash.slice(1) : 'bills';
-  switchDashTab(initialTab);
+  switchDashTab(initialTab, !!location.hash);
 
   (async () => {
     const { data } = await db.from('users').select('is_admin').eq('phone', user.phone).single();
