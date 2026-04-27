@@ -308,6 +308,7 @@
       if (rate) {
         setText('rate-note', `1 ${billCurrency} = ${fmtCurrency(rate, 'USD')} · Frankfurter / ECB`);
         if (showConverted) {
+          show($('rate-note'));
           renderItems(); renderMyTotal(); renderGuests();
         }
       }
