@@ -186,7 +186,8 @@
 
   // ── Init ─────────────────────────────────────────────────
   async function loadGroupOptions() {
-    const { data } = await Groups.getMyGroups(user.phone);
+    const { data, error } = await Groups.getMyGroups(user.phone);
+    if (error) { console.warn('loadGroupOptions failed:', error); return; }
     if (!data || data.length === 0) return;
     const field = $('group-link-field');
     const sel   = $('bill-group-select');
@@ -200,7 +201,7 @@
   }
 
   async function init() {
-    loadGroupOptions();
+    await loadGroupOptions();
     try {
       const pathId = getBillIdFromUrl();
       const isEditId = pathId && !pathId.includes('.') && pathId !== 'setup';
