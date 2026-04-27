@@ -917,7 +917,7 @@
   function renderSummary() {
     const metaTotal = (billCurrency !== 'USD' && exchangeRate)
       ? fmtCurrency(bill.grand_total * exchangeRate, 'USD')
-      : display(bill.grand_total);
+      : fmtCurrency(bill.grand_total, billCurrency);
     setText('summary-meta', `${bill.name} · ${metaTotal} total`);
 
     const subtotal    = items.reduce((s, i) => s + i.price * i.quantity, 0);
@@ -957,12 +957,12 @@
 
     const tip = subtotal * (bill.tip_percentage / 100);
 
-    function dualAmt(amount) {
+    const dualAmt = amount => {
       if (!showDual) return display(amount);
       const local = fmtCurrency(amount, billCurrency);
       const usd   = fmtCurrency(amount * exchangeRate, 'USD');
       return `${usd} <span style="font-size:10px;color:var(--text-muted);">(${local})</span>`;
-    }
+    };
 
     setHTML('summary-totals', `
       <div class="summary-total-row"><span class="key">Subtotal</span><span>${dualAmt(subtotal)}</span></div>
