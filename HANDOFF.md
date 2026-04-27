@@ -2,57 +2,67 @@
 
 ## What was done this session
 
-### Custom tip % / $ toggle
-- Setup page "Custom" tip now has a `[%] [$]` toggle
-- `$` mode accepts a flat dollar amount; converts to effective % at publish time
-- Totals panel label updates to show "fixed" vs "X%"
+### Venmo pay button
+- Summary sheet shows "Pay [Payer] on Venmo" for any guest who isn't the designated payer
+- Deep link: `venmo://paycharge?txn=pay&recipients=HANDLE&amount=X&note=BILLNAME`
+- Requires payer to have a Venmo handle set in their profile
 
-### Currency formatting
-- Fixed `fmt()` to use `Intl.toLocaleString` — now shows commas ($2,423.40) and always two decimals when cents exist
-- Dashboard bill cards use `fmtCurrency(amount, bill.currency)` instead of `fmt()`
+### Bill payer designation
+- Owner can designate any guest as the "Bill Payer" (who actually fronted the money)
+- Dropdown selector in owner controls on active bills
+- Persisted as `bills.paid_by_phone`; defaults to creator if not set
+- Venmo pay button routes to the designated payer's Venmo handle
+- SQL migration confirmed run: `ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS paid_by_phone TEXT;`
 
-### Multi-photo receipt upload
-- setup.html: pre-generates `billId = crypto.randomUUID()` upfront
-- Multiple photos can be uploaded and scanned sequentially — items merge into the list
-- Photo strip shows thumbnails with gold checkmarks after each scan
-- "Add another photo" button appears after each scan
-- On publish: photos compressed → uploaded to Supabase Storage `receipts` bucket → URLs saved in `bills.receipt_urls TEXT[]`
-- bill.html receipt sheet: "Digital / Photos" tab toggle appears when `receipt_urls` has entries
+### Venmo handle input fix
+- Fixed `@` prefix span height mismatch in `profile.html` and `admin.html`
+- Changed container to `align-items:stretch`, span to `display:flex;align-items:center`
 
-### Storage setup (user completed)
-- Created `receipts` bucket (public) in Supabase dashboard
-- Ran SQL migration: `ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS receipt_urls TEXT[] DEFAULT '{}';`
-- Storage INSERT/SELECT policies added (in supabase-schema.sql)
+### Admin link in dashboard
+- "Admin" link in dashboard header, hidden until DB confirms `is_admin = true`
 
-### 422 scan error fix
-- `parse-receipt.js`: when `JSON.parse` fails on Claude's response, now tries regex extraction of `{…}` and strips trailing commas before returning 422
-
-### Contributor management + pass-the-phone kiosk
-- **"+ Add Guest"** button (owner only, active bills): sheet with manual name+phone entry, pending list, "Add to Bill"
-  - Contacts API import hidden unless available (Android Chrome only — iOS doesn't support it, user is aware)
-  - Guests without phone get synthetic `@uuid` phone (kiosk-only, no seamless login)
-  - Guests with real phone: when they later open the bill link and log in, `ensureJoined()` matches by phone → seamless
-- **"Claim for"** button on each guest row: activates that guest as claiming context; footer shows "[Name]'s Total"; "Done →" returns to owner's own context
-- **"Pass Phone →"** button: opens fullscreen kiosk picker (grid of guest avatar cards); tap a name → claiming view for that person; "Done →" returns to picker for next person; "Exit" ends kiosk
-- `toggleClaim`, `renderItems`, `renderMyTotal` all respect `kioskGuest` state
-
-## Pending / Known issues
-
-- **Contact Picker API not on iOS** — told user, no code fix possible (Apple hasn't implemented it); manual entry is the iOS path
-- **Storage policies** — user ran INSERT/SELECT policies; if storage upload still fails, check Supabase Storage → Policies for the `receipts` bucket
-- No unresolved bugs as of end of session
+### Admin panel overhaul
+- **Accounts section**: people in `tab.users` — full edit (name, Venmo, admin toggle, delete)
+- **Bill Guests section**: people in `tab.guests` but NOT in `tab.users`
+  - Catches friends who logged in before `tab.users` upsert was added to `index.html`
+  - Edit: name only (propagates to all their guest rows)
+  - "Create Account" promotes guest → full `tab.users` entry
+  - "Remove from All Bills" clears guest rows + claims
+- Search filters both sections simultaneously
 
 ## Key file locations
-- `setup.html` — bill creation, multi-photo upload
-- `bill.html` — bill view, contributor management, kiosk mode
-- `api/parse-receipt.js` — Claude Vision OCR
-- `api/exchange-rate.js` — Frankfurter proxy
-- `js/config.js` — Supabase credentials (real, committed)
+- `setup.html` — bill creation, multi-photo upload, tip % / $ toggle
+- `bill.html` — bill view, kiosk mode, payer designation, Venmo pay button
+- `dashboard.html` — bill list, admin link (admin-gated)
+- `profile.html` — display name + Venmo handle
+- `admin.html` — admin panel: accounts + bill guests
+- `api/parse-receipt.js` — Claude Vision OCR with JSON fallback fix
+- `js/config.js` — Supabase credentials
+- `js/auth.js` — auth helpers including `updateLocalUser()`
 - `js/utils.js` — shared helpers: fmt, fmtCurrency, getPersonShare, etc.
 - `css/style.css` — all styles
-- `supabase-schema.sql` — full schema + migration comments
+- `supabase-schema.sql` — full schema + all migration comments
 
 ## Supabase project
 - URL: `https://fcscdimjhycxgstnzucd.supabase.co`
-- Schema: `tab` (separate schema, all tables prefixed)
+- Schema: `tab` (all tables prefixed)
 - Storage bucket: `receipts` (public)
+
+## All SQL migrations run
+```sql
+ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'USD';
+ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS receipt_urls TEXT[] DEFAULT '{}';
+ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS paid_by_phone TEXT;
+CREATE TABLE tab.users (
+  phone TEXT PRIMARY KEY, name TEXT NOT NULL,
+  venmo_handle TEXT, is_admin BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE tab.users ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public_all" ON tab.users FOR ALL USING (true) WITH CHECK (true);
+```
+
+## Known state / no open bugs
+- Friends who logged in before `tab.users` was introduced show under Bill Guests; use "Create Account" to promote them
+- Venmo pay button only appears if the payer has a Venmo handle in their profile
+- Contact Picker API not available on iOS (Apple limitation, no workaround)
