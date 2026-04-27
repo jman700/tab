@@ -901,6 +901,94 @@ h3 { font-size: 18px; }
 .fade-up { animation: fadeUp 0.3s var(--ease) both; }
 .pop-in  { animation: popIn  0.25s var(--ease) both; }
 
+/* ── Kiosk (pass-the-phone) ─────────────────────────────────── */
+.kiosk-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: var(--bg);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 24px 20px 100px;
+}
+.kiosk-inner {
+  max-width: var(--max-w);
+  margin: 0 auto;
+}
+.kiosk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 12px;
+  margin-top: 20px;
+}
+.kiosk-card {
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 12px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--transition);
+  -webkit-tap-highlight-color: transparent;
+}
+.kiosk-card:hover  { border-color: var(--accent); background: var(--accent-light); transform: translateY(-2px); box-shadow: var(--shadow); }
+.kiosk-card:active { transform: scale(0.97); }
+.kiosk-avatar-lg {
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 auto 10px;
+}
+.kiosk-name    { font-size: 14px; font-weight: 500; line-height: 1.2; }
+.kiosk-claimed { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+.kiosk-indicator {
+  background: var(--accent-light);
+  border: 1px solid rgba(184,135,42,0.25);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--accent-hover);
+}
+.kiosk-indicator strong { font-weight: 600; }
+.owner-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+/* ── Add-Guest Sheet ────────────────────────────────────────── */
+.pending-guest-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.pending-guest-row:last-child { border-bottom: none; }
+.claim-for-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition);
+  display: block;
+  margin-top: 2px;
+}
+.claim-for-btn:hover { border-color: var(--accent); color: var(--accent); }
+
 /* ── Photo Strip (setup multi-receipt) ──────────────────────── */
 .photo-strip {
   display: flex;

@@ -40,6 +40,18 @@
     ✦ You created this bill — only you can manage guests and close it.
   </div>
 
+  <!-- Owner quick actions (add guest / pass phone) -->
+  <div class="owner-actions hidden" id="owner-actions">
+    <button class="btn btn-secondary btn-sm" id="add-guest-btn">+ Add Guest</button>
+    <button class="btn btn-secondary btn-sm" id="kiosk-btn">Pass Phone →</button>
+  </div>
+
+  <!-- Kiosk claiming indicator -->
+  <div class="kiosk-indicator hidden" id="kiosk-indicator">
+    <span>Claiming for <strong id="kiosk-person-name">—</strong></span>
+    <button class="btn btn-sm btn-secondary" id="kiosk-done-btn">Done →</button>
+  </div>
+
   <!-- Guests section -->
   <div class="guests-section" id="guests-section">
     <div class="guests-header">
@@ -86,7 +98,7 @@
 <div class="bill-footer">
   <div class="bill-footer-inner">
     <div>
-      <span class="footer-label">Your Total</span>
+      <span class="footer-label" id="footer-label">Your Total</span>
       <span class="footer-amount" id="my-total">$0</span>
     </div>
     <div style="display:flex;gap:8px;">
@@ -127,6 +139,46 @@
   <button class="btn btn-primary btn-full mt-16" id="close-summary-btn">Done</button>
 </div>
 
+<!-- Kiosk Overlay (pass-the-phone fullscreen picker) -->
+<div class="kiosk-overlay" id="kiosk-overlay" style="display:none;">
+  <div class="kiosk-inner">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+      <h2>Who's claiming?</h2>
+      <button class="btn btn-ghost btn-sm" id="kiosk-exit-btn">Exit</button>
+    </div>
+    <p style="font-size:14px;color:var(--text-muted);">Tap your name, claim your items, then tap Done.</p>
+    <div class="kiosk-grid" id="kiosk-grid"></div>
+  </div>
+</div>
+
+<!-- Add Guest Sheet -->
+<div class="sheet-backdrop" id="add-guest-backdrop" style="display:none;"></div>
+<div class="sheet" id="add-guest-sheet" style="display:none;">
+  <div class="sheet-handle"></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <h2 style="margin:0;">Add Guests</h2>
+    <button class="btn btn-ghost btn-sm" id="close-add-guest-btn">✕</button>
+  </div>
+
+  <button class="btn btn-secondary btn-full mb-12 hidden" id="import-contacts-btn">
+    Import from Contacts
+  </button>
+
+  <div style="display:flex;gap:8px;margin-bottom:4px;">
+    <input class="input" id="new-guest-name"  type="text" placeholder="Name" style="flex:1;" />
+    <input class="input" id="new-guest-phone" type="tel"  placeholder="+1 555 000 0000" style="flex:1;" />
+    <button class="btn btn-secondary btn-sm" id="add-one-btn" style="flex-shrink:0;padding:11px 14px;">+</button>
+  </div>
+  <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+    Phone optional — without it the guest can only claim in kiosk mode (no seamless login later).
+  </p>
+
+  <div id="pending-guest-list" style="margin-bottom:16px;min-height:48px;"></div>
+
+  <button class="btn btn-primary btn-full" id="save-guests-btn">Add to Bill</button>
+  <button class="btn btn-ghost btn-full mt-8" id="cancel-add-guest-btn">Cancel</button>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="/js/config.js"></script>
 <script src="/js/auth.js"></script>
@@ -146,6 +198,8 @@
   let billCurrency   = 'USD';
   let showConverted  = false;
   let exchangeRate   = null;
+  let kioskGuest     = null; // guest currently "active" for claiming
+  let pendingGuests  = [];   // staging list in add-guest sheet
 
   function display(amount) {
     if (showConverted && exchangeRate) return fmtCurrency((amount || 0) * exchangeRate, 'USD');
@@ -298,8 +352,10 @@
     if (bill.status === 'closed') {
       show($('closed-notice'));
       hide($('owner-controls'));
+      hide($('owner-actions'));
     } else if (isOwner) {
       show($('owner-controls'));
+      show($('owner-actions'));
     }
   }
 
@@ -328,6 +384,10 @@
         ? `<button class="btn-icon" title="Remove guest" onclick="removeGuest('${g.id}', '${escHtml(g.name)}')">×</button>` : '';
       const confirmedDot = g.has_confirmed
         ? `<span style="font-size:10px;color:var(--green);">✓ confirmed</span>` : '';
+      const claimForBtn  = isOwner && bill.status !== 'closed'
+        ? `<button class="claim-for-btn" onclick="setClaimFor('${g.id}')">Claim for</button>` : '';
+      const isSynthetic  = g.phone && g.phone.startsWith('@');
+      const phoneDisplay = isSynthetic ? 'Kiosk only' : Auth.formatPhone(g.phone);
 
       return `
         <div class="guest-row" id="guest-${g.id}">
@@ -336,12 +396,15 @@
           </div>
           <div class="guest-info">
             <div class="guest-name">${escHtml(g.name)}${isMe ? ' <span style="color:var(--text-muted);font-size:12px;">(you)</span>' : ''} ${ownerTag}</div>
-            <div class="guest-phone">${Auth.formatPhone(g.phone)} ${confirmedDot}</div>
+            <div class="guest-phone">${phoneDisplay} ${confirmedDot}</div>
           </div>
-          <div class="guest-actions">
-            ${display(myShare)}
-            ${paidBtn}
-            ${removeBtn}
+          <div class="guest-actions" style="flex-direction:column;align-items:flex-end;gap:4px;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              ${display(myShare)}
+              ${paidBtn}
+              ${removeBtn}
+            </div>
+            ${claimForBtn}
           </div>
         </div>
       `;
@@ -357,16 +420,19 @@
 
     let unclaimedCount = 0;
 
+    const activePhone = kioskGuest ? kioskGuest.phone : user.phone;
+
     list.innerHTML = items.map(item => {
       let myItemShare = 0;
 
       const chips = Array.from({ length: item.quantity }, (_, unitIdx) => {
         const unitClaims = claims.filter(c => c.item_id === item.id && c.unit_index === unitIdx);
         const isEmpty    = unitClaims.length === 0;
-        const isMine     = unitClaims.some(c => c.guest_phone === user.phone);
+        const isMine     = unitClaims.some(c => c.guest_phone === activePhone);
 
         if (isEmpty) unclaimedCount++;
         if (isMine)  myItemShare += item.price / unitClaims.length;
+
 
         const avatars = unitClaims.map(c => {
           const g     = guests.find(x => x.phone === c.guest_phone);
@@ -444,34 +510,36 @@
   }
 
   function renderMyTotal() {
-    const total = getPersonShare(user.phone, claims, items, guests, bill);
+    const activePhone = kioskGuest ? kioskGuest.phone : user.phone;
+    const total = getPersonShare(activePhone, claims, items, guests, bill);
     const el    = $('my-total');
     if (el) {
-      el.textContent  = display(total);
-      el.style.color  = total > 0 ? 'var(--accent)' : 'var(--text-muted)';
+      el.textContent = display(total);
+      el.style.color = total > 0 ? 'var(--accent)' : 'var(--text-muted)';
     }
+    setText('footer-label', kioskGuest ? `${kioskGuest.name}'s Total` : 'Your Total');
   }
 
   // ── Claim Toggle ──────────────────────────────────────────
   async function toggleClaim(itemId, unitIdx) {
-    if (!myGuest)              return showToast('You must join the bill first', 'error');
     if (bill.status === 'closed') return;
 
+    const claimPhone = kioskGuest ? kioskGuest.phone : user.phone;
+    if (!kioskGuest && !myGuest) return showToast('You must join the bill first', 'error');
+
     const existing = claims.find(
-      c => c.item_id === itemId && c.unit_index === unitIdx && c.guest_phone === user.phone
+      c => c.item_id === itemId && c.unit_index === unitIdx && c.guest_phone === claimPhone
     );
 
     if (existing) {
-      // Optimistic remove
       claims = claims.filter(c => c.id !== existing.id);
       renderItems();
       renderMyTotal();
       renderConfirmBanner();
       await db.from('claims').delete().eq('id', existing.id);
     } else {
-      // Optimistic add
       const tmpId    = `tmp_${Date.now()}`;
-      const newClaim = { id: tmpId, bill_id: billId, item_id: itemId, unit_index: unitIdx, guest_phone: user.phone };
+      const newClaim = { id: tmpId, bill_id: billId, item_id: itemId, unit_index: unitIdx, guest_phone: claimPhone };
       claims.push(newClaim);
       renderItems();
       renderMyTotal();
@@ -481,11 +549,10 @@
         bill_id:     billId,
         item_id:     itemId,
         unit_index:  unitIdx,
-        guest_phone: user.phone,
+        guest_phone: claimPhone,
       }).select().single();
 
       if (error) {
-        // Rollback on failure
         claims = claims.filter(c => c.id !== tmpId);
         renderItems();
         renderMyTotal();
@@ -569,6 +636,20 @@
   });
 
   $('back-btn').addEventListener('click', () => navigateTo('/dashboard.html'));
+
+  // ── Kiosk + Add-Guest listeners ───────────────────────────
+  $('kiosk-btn').addEventListener('click',       openKioskMode);
+  $('kiosk-exit-btn').addEventListener('click',  exitKioskMode);
+  $('kiosk-done-btn').addEventListener('click',  exitKioskGuest);
+  $('add-guest-btn').addEventListener('click',   openAddGuestSheet);
+  $('close-add-guest-btn').addEventListener('click',  () => closeSheet('add-guest-backdrop', 'add-guest-sheet'));
+  $('cancel-add-guest-btn').addEventListener('click', () => closeSheet('add-guest-backdrop', 'add-guest-sheet'));
+  $('add-guest-backdrop').addEventListener('click',   () => closeSheet('add-guest-backdrop', 'add-guest-sheet'));
+  $('import-contacts-btn').addEventListener('click',  importContacts);
+  $('add-one-btn').addEventListener('click',     addOnePending);
+  $('save-guests-btn').addEventListener('click', saveGuests);
+  $('new-guest-name').addEventListener('keydown',  e => { if (e.key === 'Enter') $('new-guest-phone').focus(); });
+  $('new-guest-phone').addEventListener('keydown', e => { if (e.key === 'Enter') addOnePending(); });
 
   // ── Receipt Sheet ─────────────────────────────────────────
   function showDigitalTab() {
@@ -832,6 +913,175 @@
       show($('closed-notice'));
       hide($('owner-controls'));
       renderItems();
+    }
+  }
+
+  // ── Kiosk Mode ────────────────────────────────────────────
+  function openKioskMode() {
+    const grid = $('kiosk-grid');
+    grid.innerHTML = guests.map((g, i) => {
+      const color      = getPersonColor(i);
+      const claimCount = claims.filter(c => c.guest_phone === g.phone).length;
+      return `
+        <div class="kiosk-card" onclick="enterKioskForGuest('${g.id}')">
+          <div class="kiosk-avatar-lg" style="background:${color}22;color:${color};border:2px solid ${color}44;">
+            ${getInitials(g.name)}
+          </div>
+          <div class="kiosk-name">${escHtml(g.name)}</div>
+          <div class="kiosk-claimed">${claimCount} item${claimCount !== 1 ? 's' : ''} claimed</div>
+        </div>
+      `;
+    }).join('');
+    $('kiosk-overlay').style.display = 'block';
+    document.body.style.overflow = 'hidden';
+  }
+
+  function enterKioskForGuest(guestId) {
+    kioskGuest = guests.find(g => g.id === guestId) || null;
+    if (!kioskGuest) return;
+    $('kiosk-overlay').style.display = 'none';
+    document.body.style.overflow = '';
+    setText('kiosk-person-name', kioskGuest.name);
+    show($('kiosk-indicator'));
+    renderItems();
+    renderMyTotal();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function exitKioskGuest() {
+    // Return to picker so next person can go
+    kioskGuest = null;
+    hide($('kiosk-indicator'));
+    renderItems();
+    renderMyTotal();
+    openKioskMode();
+  }
+
+  function exitKioskMode() {
+    kioskGuest = null;
+    $('kiosk-overlay').style.display = 'none';
+    document.body.style.overflow = '';
+    hide($('kiosk-indicator'));
+    renderItems();
+    renderMyTotal();
+  }
+
+  function setClaimFor(guestId) {
+    kioskGuest = guests.find(g => g.id === guestId) || null;
+    if (!kioskGuest) return;
+    setText('kiosk-person-name', kioskGuest.name);
+    show($('kiosk-indicator'));
+    renderItems();
+    renderMyTotal();
+    // Hide guest list and scroll up
+    $('guests-list').style.display = 'none';
+    guestsVisible = false;
+    setText('toggle-guests-btn', 'Show');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // ── Add Guest Sheet ───────────────────────────────────────
+  function openAddGuestSheet() {
+    pendingGuests = [];
+    renderPendingGuests();
+    $('new-guest-name').value  = '';
+    $('new-guest-phone').value = '';
+    if ('contacts' in navigator && navigator.contacts) {
+      show($('import-contacts-btn'));
+    } else {
+      hide($('import-contacts-btn'));
+    }
+    openSheet('add-guest-backdrop', 'add-guest-sheet');
+  }
+
+  function renderPendingGuests() {
+    const list = $('pending-guest-list');
+    if (pendingGuests.length === 0) {
+      list.innerHTML = '<p style="font-size:13px;color:var(--text-muted);padding:8px 0;">No guests added yet.</p>';
+      return;
+    }
+    list.innerHTML = pendingGuests.map((g, i) => `
+      <div class="pending-guest-row">
+        <div class="guest-avatar" style="background:var(--accent-light);color:var(--accent);border:1.5px solid rgba(184,135,42,0.3);">
+          ${getInitials(g.name)}
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:14px;font-weight:500;">${escHtml(g.name)}</div>
+          <div style="font-size:12px;color:var(--text-muted);">${g.phone || 'No phone — kiosk only'}</div>
+        </div>
+        <button class="btn-icon" onclick="removePending(${i})">×</button>
+      </div>
+    `).join('');
+  }
+
+  function addOnePending() {
+    const name  = $('new-guest-name').value.trim();
+    const phone = $('new-guest-phone').value.trim();
+    if (!name) { showToast('Name is required', 'error'); $('new-guest-name').focus(); return; }
+    pendingGuests.push({ name, phone: phone || null });
+    $('new-guest-name').value  = '';
+    $('new-guest-phone').value = '';
+    $('new-guest-name').focus();
+    renderPendingGuests();
+  }
+
+  function removePending(idx) {
+    pendingGuests.splice(idx, 1);
+    renderPendingGuests();
+  }
+
+  async function importContacts() {
+    try {
+      const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
+      if (!contacts || contacts.length === 0) return;
+      contacts.forEach(c => {
+        const name  = (c.name  && c.name[0])  || '';
+        const phone = (c.tel   && c.tel[0])   || null;
+        if (name) pendingGuests.push({ name, phone });
+      });
+      renderPendingGuests();
+      showToast(`${contacts.length} contact${contacts.length !== 1 ? 's' : ''} added`, 'success');
+    } catch (e) {
+      if (e.name !== 'AbortError') showToast('Could not access contacts', 'error');
+    }
+  }
+
+  async function saveGuests() {
+    if (pendingGuests.length === 0) return showToast('Add at least one guest first', 'error');
+    const btn = $('save-guests-btn');
+    btn.disabled = true;
+    btn.textContent = 'Adding…';
+
+    try {
+      const existingPhones = new Set(guests.map(g => g.phone));
+      const rows = pendingGuests
+        .filter(g => !g.phone || !existingPhones.has(g.phone))
+        .map(g => ({
+          bill_id: billId,
+          name:    g.name,
+          phone:   g.phone || `@${crypto.randomUUID().slice(0, 8)}`,
+        }));
+
+      if (rows.length === 0) {
+        showToast('All contacts are already on this bill', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Add to Bill';
+        return;
+      }
+
+      const { data: newGuests, error } = await db.from('guests').insert(rows).select();
+      if (error) throw error;
+
+      guests = [...guests, ...(newGuests || [])];
+      renderGuests();
+      setText('guest-count', guests.length);
+      closeSheet('add-guest-backdrop', 'add-guest-sheet');
+      showToast(`${newGuests.length} guest${newGuests.length !== 1 ? 's' : ''} added!`, 'success');
+    } catch (err) {
+      const msg = err?.message || err?.code || JSON.stringify(err);
+      showToast(`Could not add guests: ${msg}`, 'error', 6000);
+      btn.disabled = false;
+      btn.textContent = 'Add to Bill';
     }
   }
 

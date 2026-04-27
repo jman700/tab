@@ -101,8 +101,21 @@ export default async function handler(req, res) {
     try {
       parsed = JSON.parse(clean);
     } catch {
-      console.error('JSON parse failed:', clean);
-      return res.status(422).json({ error: 'Could not parse receipt — please add items manually' });
+      // Claude sometimes wraps JSON or adds trailing text — try to extract it
+      const match = clean.match(/\{[\s\S]*\}/);
+      if (match) {
+        try {
+          // Also strip trailing commas before } or ] which Claude occasionally adds
+          const fixed = match[0].replace(/,(\s*[}\]])/g, '$1');
+          parsed = JSON.parse(fixed);
+        } catch {
+          console.error('JSON parse failed after extraction attempt:', clean.slice(0, 500));
+          return res.status(422).json({ error: 'Could not parse receipt — please add items manually' });
+        }
+      } else {
+        console.error('No JSON object found in Claude response:', clean.slice(0, 500));
+        return res.status(422).json({ error: 'Could not parse receipt — please add items manually' });
+      }
     }
 
     const validCurrencies = ['USD','EUR','GBP','JPY','CAD','AUD','MXN','BRL','INR','CNY','KRW','SGD','HKD','CHF','NOK','SEK','NZD','ZAR','AED','THB','MYR','PHP','IDR','COP','CLP','PEN','ARS'];
