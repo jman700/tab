@@ -34,6 +34,7 @@
   <!-- Tab bar -->
   <div class="toggle-group" id="tab-bar" style="margin-bottom:20px;">
     <button class="toggle-btn active" id="tab-expenses">Expenses</button>
+    <button class="toggle-btn" id="tab-balances">Balances</button>
     <button class="toggle-btn" id="tab-members">Members</button>
   </div>
 
@@ -46,6 +47,16 @@
       </div>
     </div>
     <button class="btn btn-primary btn-full mt-16" id="add-expense-btn">+ Add Expense</button>
+  </div>
+
+  <!-- Balances tab -->
+  <div id="balances-tab" style="display:none;">
+    <div id="balances-list">
+      <div class="bill-card-skeleton">
+        <div class="skeleton" style="height:18px;width:50%;margin-bottom:10px;"></div>
+        <div class="skeleton" style="height:13px;width:30%;"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Members tab -->
@@ -110,6 +121,7 @@
 <script src="/js/auth.js"></script>
 <script src="/js/utils.js"></script>
 <script src="/js/groups.js"></script>
+<script src="/js/balance.js"></script>
 <script>
   const user = Auth.requireAuth();
   if (!user) throw new Error('Not authenticated');
@@ -171,14 +183,17 @@
 
   // ── Tab navigation ────────────────────────────────────────
   $('tab-expenses').addEventListener('click', () => switchTab('expenses'));
+  $('tab-balances').addEventListener('click', () => switchTab('balances'));
   $('tab-members').addEventListener('click',  () => switchTab('members'));
 
   function switchTab(tab) {
-    const isExpenses = tab === 'expenses';
-    $('expenses-tab').style.display = isExpenses ? '' : 'none';
-    $('members-tab').style.display  = isExpenses ? 'none' : '';
-    $('tab-expenses').classList.toggle('active', isExpenses);
-    $('tab-members').classList.toggle('active', !isExpenses);
+    $('expenses-tab').style.display  = tab === 'expenses' ? '' : 'none';
+    $('balances-tab').style.display  = tab === 'balances' ? '' : 'none';
+    $('members-tab').style.display   = tab === 'members'  ? '' : 'none';
+    $('tab-expenses').classList.toggle('active', tab === 'expenses');
+    $('tab-balances').classList.toggle('active', tab === 'balances');
+    $('tab-members').classList.toggle('active', tab === 'members');
+    if (tab === 'balances') loadBalances();
   }
 
   // ── Members tab ───────────────────────────────────────────
@@ -221,6 +236,90 @@
   $('invite-btn').addEventListener('click', shareInvite);
   $('invite-members-btn').addEventListener('click', shareInvite);
   $('back-btn').addEventListener('click', () => navigateTo('/dashboard.html'));
+
+  // ── Balances tab ──────────────────────────────────────────
+  async function loadBalances() {
+    setHTML('balances-list', '<p style="font-size:14px;color:var(--text-muted);">Computing balances…</p>');
+
+    const [{ data: expenses, error: e1 }, { data: bills, error: e2 }] = await Promise.all([
+      Groups.getExpenses(groupId),
+      Groups.getBillsForGroup(groupId),
+    ]);
+
+    if (e1 || e2) {
+      setHTML('balances-list', '<p style="font-size:14px;color:var(--text-muted);">Could not load balances.</p>');
+      return;
+    }
+
+    const allExpenses = expenses || [];
+    const allBills    = bills    || [];
+
+    const currencies = [
+      ...allExpenses.map(e => e.currency),
+      ...allBills.map(b => b.currency),
+    ];
+
+    const rates    = await Balance.fetchRates(currencies);
+    const rawNet   = Balance.computeRaw(allExpenses, allBills, members);
+    const byMember = Balance.toUSD(rawNet, members, rates);
+
+    renderBalances(byMember);
+  }
+
+  function renderBalances(byMember) {
+    if (byMember.every(m => Math.abs(m.usdNet) < 0.01)) {
+      setHTML('balances-list', `
+        <div class="empty">
+          <div class="empty-icon">✓</div>
+          <h3>All settled up</h3>
+          <p>No one owes anyone in this group.</p>
+        </div>
+      `);
+      return;
+    }
+
+    setHTML('balances-list', byMember.map((m, i) => {
+      const isYou   = m.phone === user.phone;
+      const net     = m.usdNet;
+      const absNet  = Math.abs(net);
+      const color   = net > 0.01 ? 'var(--green)' : net < -0.01 ? 'var(--red)' : 'var(--text-muted)';
+      const label   = net > 0.01
+        ? (isYou ? 'You are owed' : 'Is owed')
+        : net < -0.01
+        ? (isYou ? 'You owe' : 'Owes')
+        : 'Settled up';
+
+      const breakdown = m.breakdown.length > 1
+        ? `<details style="margin-top:6px;">
+            <summary style="font-size:12px;color:var(--text-muted);cursor:pointer;">Per currency</summary>
+            <div style="padding:6px 0 0 0;">
+              ${m.breakdown.map(b => `
+                <div style="font-size:12px;color:var(--text-muted);display:flex;justify-content:space-between;padding:2px 0;">
+                  <span>${b.currency}</span>
+                  <span>${b.amount >= 0 ? '+' : ''}${fmtCurrency(b.amount, b.currency)}
+                    ${b.rateAvailable ? `<span style="color:var(--text-muted);"> ≈ ${fmtCurrency(b.usdAmount, 'USD')}</span>` : '<span style="color:var(--red);"> (rate unavailable)</span>'}
+                  </span>
+                </div>
+              `).join('')}
+            </div>
+          </details>`
+        : '';
+
+      return `
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);">
+          <div style="width:36px;height:36px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;background:${getPersonColor(i)}22;color:${getPersonColor(i)};border:1.5px solid ${getPersonColor(i)}44;">
+            ${escHtml(getInitials(m.display_name))}
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:14px;font-weight:500;">${escHtml(m.display_name)}${isYou ? ' <span style="font-size:11px;color:var(--text-muted);">(you)</span>' : ''}</div>
+            <div style="font-size:12px;color:${color};margin-top:2px;">${label}</div>
+            ${breakdown}
+          </div>
+          <div style="font-size:16px;font-weight:600;color:${color};">${absNet < 0.01 ? '—' : fmtCurrency(absNet, 'USD')}</div>
+        </div>
+      `;
+    }).join(''));
+  }
 
   // ── Expenses tab ──────────────────────────────────────────
   async function loadExpenses() {
