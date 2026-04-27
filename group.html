@@ -409,6 +409,7 @@
     if (!description) { showToast('Enter a description', 'error'); return; }
     if (!amount || amount <= 0) { showToast('Enter a valid amount', 'error'); return; }
     if (!paid_by) { showToast('Select who paid', 'error'); return; }
+    if (members.length === 0) { showToast('No members to split with', 'error'); return; }
 
     let splits = [];
 
@@ -419,7 +420,7 @@
       const diff = parseFloat((amount - sum).toFixed(2));
       if (Math.abs(diff) > 0) {
         const payerSplit = splits.find(s => s.phone === paid_by) || splits[0];
-        payerSplit.amount = parseFloat((payerSplit.amount + diff).toFixed(2));
+        if (payerSplit) payerSplit.amount = parseFloat((payerSplit.amount + diff).toFixed(2));
       }
 
     } else if (activeSplitMethod === 'percentage') {
@@ -430,6 +431,13 @@
         phone:  el.dataset.phone,
         amount: parseFloat((amount * (parseFloat(el.value) || 0) / 100).toFixed(2)),
       }));
+      // Reconcile rounding: assign remainder to payer
+      const pctSum  = splits.reduce((s, x) => s + x.amount, 0);
+      const pctDiff = parseFloat((amount - pctSum).toFixed(2));
+      if (Math.abs(pctDiff) > 0) {
+        const payerSplit = splits.find(s => s.phone === paid_by) || splits[0];
+        if (payerSplit) payerSplit.amount = parseFloat((payerSplit.amount + pctDiff).toFixed(2));
+      }
 
     } else if (activeSplitMethod === 'exact') {
       const inputs     = $$('.split-exact-input');
@@ -448,20 +456,22 @@
     btn.disabled    = true;
     btn.textContent = 'Saving…';
 
-    const { error } = await Groups.addExpense(
-      groupId,
-      { description, amount, currency, paid_by, split_method: activeSplitMethod, note },
-      splits
-    );
+    try {
+      const { error } = await Groups.addExpense(
+        groupId,
+        { description, amount, currency, paid_by, split_method: activeSplitMethod, note },
+        splits
+      );
 
-    btn.disabled    = false;
-    btn.textContent = 'Add Expense';
+      if (error) { showToast('Could not save expense', 'error'); return; }
 
-    if (error) { showToast('Could not save expense', 'error'); return; }
-
-    closeSheet('expense-backdrop', 'expense-sheet');
-    showToast('Expense added', 'success');
-    await loadExpenses();
+      closeSheet('expense-backdrop', 'expense-sheet');
+      showToast('Expense added', 'success');
+      await loadExpenses();
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = 'Add Expense';
+    }
   });
 
   init();
