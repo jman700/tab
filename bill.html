@@ -89,8 +89,23 @@
       <span class="footer-label">Your Total</span>
       <span class="footer-amount" id="my-total">$0</span>
     </div>
-    <button class="btn btn-primary" id="summary-btn">Summary</button>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" id="receipt-btn">Receipt</button>
+      <button class="btn btn-primary"   id="summary-btn">Summary</button>
+    </div>
   </div>
+</div>
+
+<!-- Receipt Sheet -->
+<div class="sheet-backdrop" id="receipt-backdrop" style="display:none;"></div>
+<div class="sheet" id="receipt-sheet" style="display:none;">
+  <div class="sheet-handle"></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <h2 style="margin:0;">Receipt</h2>
+    <button class="btn btn-primary btn-sm" id="save-receipt-btn">Save / Share</button>
+  </div>
+  <div id="receipt-preview" style="overflow-y:auto;-webkit-overflow-scrolling:touch;text-align:center;background:#FDFBF6;border-radius:10px;padding:8px;max-height:58vh;"></div>
+  <button class="btn btn-ghost btn-full mt-16" id="close-receipt-btn">Done</button>
 </div>
 
 <!-- Summary Sheet -->
@@ -547,6 +562,148 @@
   });
 
   $('back-btn').addEventListener('click', () => navigateTo('/dashboard.html'));
+
+  // ── Receipt Sheet ─────────────────────────────────────────
+  $('receipt-btn').addEventListener('click', () => {
+    $('receipt-preview').innerHTML = '';
+    $('receipt-preview').appendChild(buildReceiptCanvas());
+    openSheet('receipt-backdrop', 'receipt-sheet');
+  });
+  $('close-receipt-btn').addEventListener('click',  () => closeSheet('receipt-backdrop', 'receipt-sheet'));
+  $('receipt-backdrop').addEventListener('click',   () => closeSheet('receipt-backdrop', 'receipt-sheet'));
+  $('save-receipt-btn').addEventListener('click', () => {
+    const canvas = $('receipt-preview').querySelector('canvas');
+    if (!canvas) return;
+    const fileName = `${bill.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-receipt.png`;
+    canvas.toBlob(async blob => {
+      const file = new File([blob], fileName, { type: 'image/png' });
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: `${bill.name} Receipt` }); return; }
+        catch (e) { if (e.name === 'AbortError') return; }
+      }
+      const url = URL.createObjectURL(blob);
+      const a   = document.createElement('a');
+      a.href = url; a.download = fileName; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, 'image/png');
+  });
+
+  function buildReceiptCanvas() {
+    const currency = bill.currency || 'USD';
+    const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const tax      = bill.tax_included ? 0 : (bill.tax_amount || 0);
+    const tip      = subtotal * ((bill.tip_percentage || 0) / 100);
+    const money    = n => fmtCurrency(n, currency);
+
+    const W   = 360;
+    const P   = 24;
+    const IW  = W - P * 2;
+    const DPR = 2;
+
+    // Pre-calculate canvas height
+    let h = P;
+    h += 28 + 12 + 2 + 12;
+    h += 20 + 18 + 12 + 2 + 12;
+    h += 16 + 8 + 1 + 8;
+    items.forEach(item => { h += 22; if (item.note) h += 16; });
+    h += 8 + 1 + 12;
+    h += 20;
+    if (tax > 0) h += 20;
+    if (tip > 0) h += 20;
+    h += 10 + 2 + 8 + 26 + 2 + 16;
+    if (currency !== 'USD') h += 16;
+    h += 16 + P;
+
+    const canvas  = document.createElement('canvas');
+    canvas.width  = W * DPR;
+    canvas.height = h * DPR;
+    canvas.style.width    = '100%';
+    canvas.style.maxWidth = W + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.scale(DPR, DPR);
+
+    // Palette
+    const INK = '#1C1208', MUTED = '#8A7A6A', ACCENT = '#B8872A', LINE = '#D4C9B8';
+    ctx.fillStyle = '#FDFBF6';
+    ctx.fillRect(0, 0, W, h);
+
+    const sans = (sz, bold) => `${bold ? '600 ' : ''}${sz}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    const mono = sz => `${sz}px "Courier New", Courier, monospace`;
+
+    function draw(text, x, y_, font, color, align = 'left') {
+      ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align;
+      ctx.fillText(String(text), x, y_);
+    }
+    function trunc(text, maxW, font) {
+      ctx.font = font;
+      if (ctx.measureText(text).width <= maxW) return text;
+      let t = text;
+      while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+      return t + '…';
+    }
+    const thickLine = y_ => { ctx.fillStyle = ACCENT; ctx.fillRect(P, y_, IW, 2); };
+    const thinLine  = y_ => { ctx.fillStyle = LINE;   ctx.fillRect(P, y_, IW, 1); };
+
+    let y = P;
+
+    // Brand
+    draw('tab', P, y + 20, sans(20, true), ACCENT);
+    draw('receipt', W - P, y + 20, sans(10, false), MUTED, 'right');
+    y += 28;
+
+    y += 12; thickLine(y); y += 2 + 12;
+
+    // Bill name + date
+    draw(bill.name, W / 2, y + 15, sans(13, true), INK, 'center');    y += 20;
+    draw(formatDate(bill.created_at), W / 2, y + 13, sans(11, false), MUTED, 'center'); y += 18;
+
+    y += 12; thickLine(y); y += 2 + 12;
+
+    // Column headers
+    draw('ITEM',   P,               y + 12, mono(9), MUTED);
+    draw('QTY',    P + IW * 0.70,   y + 12, mono(9), MUTED, 'right');
+    draw('AMOUNT', W - P,           y + 12, mono(9), MUTED, 'right');
+    y += 16;
+    y += 8; thinLine(y); y += 1 + 8;
+
+    // Items
+    const nFont = mono(11), nMaxW = IW * 0.58;
+    items.forEach(item => {
+      draw(trunc(item.name, nMaxW, nFont), P,             y + 15, nFont,    INK);
+      draw(String(item.quantity),          P + IW * 0.70, y + 15, mono(11), INK, 'right');
+      draw(money(item.price * item.quantity), W - P,      y + 15, mono(11), INK, 'right');
+      y += 22;
+      if (item.note) {
+        draw(trunc(`  ${item.note}`, IW * 0.88, mono(9)), P, y + 12, mono(9), MUTED);
+        y += 16;
+      }
+    });
+
+    y += 8; thinLine(y); y += 1 + 12;
+
+    // Subtotals
+    const totRow = (label, val, y_) => {
+      draw(label,     P,     y_ + 14, mono(11), MUTED);
+      draw(money(val), W - P, y_ + 14, mono(11), INK, 'right');
+    };
+    totRow('Subtotal', subtotal, y); y += 20;
+    if (tax > 0) { totRow('Tax', tax, y); y += 20; }
+    if (tip > 0) { totRow(`Tip (${bill.tip_percentage}%)`, tip, y); y += 20; }
+
+    y += 10; thickLine(y); y += 2 + 8;
+    draw('TOTAL',              P,     y + 20, sans(14, true), ACCENT);
+    draw(money(bill.grand_total), W - P, y + 20, sans(14, true), ACCENT, 'right');
+    y += 26;
+    thickLine(y); y += 2 + 16;
+
+    if (currency !== 'USD') {
+      draw(`All amounts in ${currency}`, W / 2, y + 12, sans(10, false), MUTED, 'center');
+      y += 16;
+    }
+    draw('Generated by Tab', W / 2, y + 12, sans(10, false), MUTED, 'center');
+
+    return canvas;
+  }
 
   // ── Summary Sheet ─────────────────────────────────────────
   $('summary-btn').addEventListener('click', () => {
