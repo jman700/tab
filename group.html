@@ -556,6 +556,8 @@
     const included = getIncludedMembers();
     const n        = included.length;
 
+    if (n === 0) { setHTML('split-inputs', ''); return; }
+
     if (method === 'equal') {
       const each = n > 0 ? (amount / n) : 0;
       setHTML('split-inputs', `
@@ -685,10 +687,16 @@
     if (!expense_date) { showToast('Date is required', 'error'); return; }
     if (members.length === 0) { showToast('No members to split with', 'error'); return; }
 
+    const includedAtSave = getIncludedMembers();
+    if (!includedAtSave.some(m => m.phone === paid_by)) {
+      showToast('Payer must be included in the split', 'error');
+      return;
+    }
+
     let splits = [];
 
     if (activeSplitMethod === 'equal') {
-      const included  = getIncludedMembers();
+      const included  = includedAtSave;
       const n         = included.length;
       const baseShare = Math.floor((amount / n) * 100) / 100;
       splits = included.map(m => ({ phone: m.phone, amount: baseShare }));
