@@ -7,6 +7,8 @@
 const Groups = (() => {
 
   async function createGroup(name, phone, displayName) {
+    if (!name || typeof name !== 'string') return { error: new Error('Invalid group name') };
+    if (!displayName || typeof displayName !== 'string') return { error: new Error('Invalid display name') };
     const { data: group, error: e1 } = await db
       .from('groups')
       .insert({ name: name.trim(), created_by: phone })
@@ -53,6 +55,7 @@ const Groups = (() => {
   }
 
   async function joinGroup(groupId, inviteToken, phone, displayName) {
+    if (!inviteToken) return { error: new Error('Missing invite token') };
     const { data: group, error: e1 } = await db
       .from('groups')
       .select('id, invite_token')
@@ -94,7 +97,8 @@ const Groups = (() => {
     }));
     const { error: e2 } = await db.from('expense_splits').insert(splitRows);
     if (e2) {
-      await db.from('expenses').delete().eq('id', exp.id);
+      const { error: e3 } = await db.from('expenses').delete().eq('id', exp.id);
+      if (e3) console.error('Rollback failed, orphaned expense:', exp.id, e3);
       return { error: e2 };
     }
     return { data: exp };
