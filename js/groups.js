@@ -101,7 +101,7 @@ const Groups = (() => {
   }
 
   async function addExpense(groupId, expense, splits) {
-    // expense: { description, amount, currency, paid_by, split_method, note }
+    // expense: { description, amount, currency, paid_by, split_method, note, expense_date }
     // splits: [{ phone, amount }]
     const { data: exp, error: e1 } = await db
       .from('expenses')
@@ -129,7 +129,8 @@ const Groups = (() => {
       .from('expenses')
       .select('*')
       .eq('group_id', groupId)
-      .order('created_at', { ascending: false });
+      .order('expense_date', { ascending: false, nullsFirst: false })
+      .order('created_at',   { ascending: false });
     if (e1) return { error: e1 };
     if (!expenses || expenses.length === 0) return { data: [] };
 
