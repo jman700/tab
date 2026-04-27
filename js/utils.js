@@ -2,7 +2,63 @@
 // TAB — Utilities
 // ============================================================
 
-// ── Currency ────────────────────────────────────────────────
+// ── Currency list ────────────────────────────────────────────
+const CURRENCIES = [
+  { code: 'USD', name: 'US Dollar'          },
+  { code: 'EUR', name: 'Euro'               },
+  { code: 'GBP', name: 'British Pound'      },
+  { code: 'MXN', name: 'Mexican Peso'       },
+  { code: 'CAD', name: 'Canadian Dollar'    },
+  { code: 'AUD', name: 'Australian Dollar'  },
+  { code: 'JPY', name: 'Japanese Yen'       },
+  { code: 'CNY', name: 'Chinese Yuan'       },
+  { code: 'BRL', name: 'Brazilian Real'     },
+  { code: 'INR', name: 'Indian Rupee'       },
+  { code: 'KRW', name: 'Korean Won'         },
+  { code: 'SGD', name: 'Singapore Dollar'   },
+  { code: 'HKD', name: 'Hong Kong Dollar'   },
+  { code: 'CHF', name: 'Swiss Franc'        },
+  { code: 'NOK', name: 'Norwegian Krone'    },
+  { code: 'SEK', name: 'Swedish Krona'      },
+  { code: 'NZD', name: 'New Zealand Dollar' },
+  { code: 'ZAR', name: 'South African Rand' },
+  { code: 'AED', name: 'UAE Dirham'         },
+  { code: 'THB', name: 'Thai Baht'          },
+  { code: 'MYR', name: 'Malaysian Ringgit'  },
+  { code: 'PHP', name: 'Philippine Peso'    },
+  { code: 'IDR', name: 'Indonesian Rupiah'  },
+  { code: 'COP', name: 'Colombian Peso'     },
+  { code: 'CLP', name: 'Chilean Peso'       },
+  { code: 'PEN', name: 'Peruvian Sol'       },
+  { code: 'ARS', name: 'Argentine Peso'     },
+];
+
+function fmtCurrency(amount, code) {
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: code || 'USD' }).format(amount || 0);
+  } catch {
+    return `${code} ${(amount || 0).toFixed(2)}`;
+  }
+}
+
+const _rateCache = {};
+async function getExchangeRate(from, to) {
+  if (!from || from === to) return 1;
+  const key = `${from}_${to}`;
+  if (_rateCache[key]) return _rateCache[key];
+  try {
+    const res  = await fetch(`https://api.frankfurter.app/latest?from=${from}&to=${to}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const rate = data.rates?.[to];
+    if (rate) _rateCache[key] = rate;
+    return rate || null;
+  } catch {
+    return null;
+  }
+}
+
+// ── Amount formatting ────────────────────────────────────────
 function fmt(n, currency = '') {
   const abs = Math.abs(n || 0);
   const s = abs % 1 === 0

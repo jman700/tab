@@ -59,8 +59,12 @@
   <div class="items-section mt-16">
     <div class="section-head mb-12">
       <h2 style="font-size:18px;">Items</h2>
-      <span class="text-muted" style="font-size:13px;" id="unclaimed-notice"></span>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="text-muted" style="font-size:13px;" id="unclaimed-notice"></span>
+        <div class="toggle-group hidden" id="currency-toggle" style="font-size:12px;"></div>
+      </div>
     </div>
+    <p id="rate-note" class="hidden" style="font-size:11px;color:var(--text-muted);margin-top:-8px;margin-bottom:12px;"></p>
     <div id="items-list"></div>
   </div>
 
@@ -116,7 +120,15 @@
   let claims   = [];
   let isOwner  = false;
   let myGuest  = null;
-  let guestsVisible = false;
+  let guestsVisible  = false;
+  let billCurrency   = 'USD';
+  let showConverted  = false;
+  let exchangeRate   = null;
+
+  function display(amount) {
+    if (showConverted && exchangeRate) return fmtCurrency((amount || 0) * exchangeRate, 'USD');
+    return fmtCurrency(amount, billCurrency);
+  }
 
   const billId = getBillIdFromUrl();
   if (!billId) navigateTo('/dashboard.html');
@@ -126,7 +138,44 @@
     await loadAll();
     await ensureJoined();
     render();
+    setupCurrencyToggle();
     subscribeRealtime();
+  }
+
+  function setupCurrencyToggle() {
+    billCurrency = bill.currency || 'USD';
+    if (billCurrency === 'USD') return;
+
+    const toggleEl = $('currency-toggle');
+    toggleEl.innerHTML = `
+      <button class="toggle-btn active" id="btn-orig">${billCurrency}</button>
+      <button class="toggle-btn" id="btn-usd">USD</button>
+    `;
+    show(toggleEl);
+
+    $('btn-orig').addEventListener('click', () => {
+      showConverted = false;
+      $('btn-orig').classList.add('active');
+      $('btn-usd').classList.remove('active');
+      hide($('rate-note'));
+      renderItems(); renderMyTotal(); renderGuests();
+    });
+
+    $('btn-usd').addEventListener('click', () => {
+      if (!exchangeRate) return showToast('Exchange rate unavailable — try again shortly', 'error');
+      showConverted = true;
+      $('btn-usd').classList.add('active');
+      $('btn-orig').classList.remove('active');
+      show($('rate-note'));
+      renderItems(); renderMyTotal(); renderGuests();
+    });
+
+    getExchangeRate(billCurrency, 'USD').then(rate => {
+      exchangeRate = rate;
+      if (rate) {
+        setText('rate-note', `1 ${billCurrency} = ${fmtCurrency(rate, 'USD')} · Frankfurter / ECB`);
+      }
+    });
   }
 
   async function loadAll() {
@@ -228,7 +277,7 @@
             <div class="guest-phone">${Auth.formatPhone(g.phone)} ${confirmedDot}</div>
           </div>
           <div class="guest-actions">
-            ${fmt(myShare)}
+            ${display(myShare)}
             ${paidBtn}
             ${removeBtn}
           </div>
@@ -290,11 +339,11 @@
               ${item.note ? `<div class="item-claim-note">${escHtml(item.note)}</div>` : ''}
             </div>
             <div class="item-claim-price">
-              ${fmt(item.price)} <span>/ each</span>
+              ${display(item.price)} <span>/ each</span>
             </div>
           </div>
           <div class="claim-chips">${chips}</div>
-          ${hasMine ? `<div class="item-my-share">Your share: ${fmt(myItemShare)}</div>` : ''}
+          ${hasMine ? `<div class="item-my-share">Your share: ${display(myItemShare)}</div>` : ''}
         </div>
       `;
     }).join('');
@@ -326,7 +375,7 @@
     const total = getPersonShare(user.phone, claims, items, guests, bill);
     const el    = $('my-total');
     if (el) {
-      el.textContent  = fmt(total);
+      el.textContent  = display(total);
       el.style.color  = total > 0 ? 'var(--accent)' : 'var(--text-muted)';
     }
   }
@@ -458,7 +507,7 @@
   $('summary-backdrop').addEventListener('click',  () => closeSheet('summary-backdrop', 'summary-sheet'));
 
   function renderSummary() {
-    setText('summary-meta', `${bill.name} · ${fmt(bill.grand_total)} total`);
+    setText('summary-meta', `${bill.name} · ${display(bill.grand_total)} total`);
 
     const subtotal    = items.reduce((s, i) => s + i.price * i.quantity, 0);
 
@@ -479,7 +528,7 @@
               <div class="summary-bar-fill" style="width:${pct}%;background:${color};"></div>
             </div>
           </div>
-          <div class="summary-amount" style="color:${color};">${fmt(share)}</div>
+          <div class="summary-amount" style="color:${color};">${display(share)}</div>
         </div>
       `;
     }).join('');
@@ -488,12 +537,12 @@
 
     const tip = subtotal * (bill.tip_percentage / 100);
     setHTML('summary-totals', `
-      <div class="summary-total-row"><span class="key">Subtotal</span><span>${fmt(subtotal)}</span></div>
-      <div class="summary-total-row"><span class="key">Tax</span><span>${fmt(bill.tax_amount)}</span></div>
-      <div class="summary-total-row"><span class="key">Tip (${bill.tip_percentage}%)</span><span>${fmt(tip)}</span></div>
+      <div class="summary-total-row"><span class="key">Subtotal</span><span>${display(subtotal)}</span></div>
+      <div class="summary-total-row"><span class="key">Tax</span><span>${display(bill.tax_amount)}</span></div>
+      <div class="summary-total-row"><span class="key">Tip (${bill.tip_percentage}%)</span><span>${display(tip)}</span></div>
       <div class="summary-final">
         <span class="key">Total</span>
-        <span class="val">${fmt(bill.grand_total)}</span>
+        <span class="val">${display(bill.grand_total)}</span>
       </div>
     `);
   }
@@ -501,9 +550,9 @@
   // ── Realtime ──────────────────────────────────────────────
   function subscribeRealtime() {
     db.channel(`bill-${billId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'claims', filter: `bill_id=eq.${billId}` }, onClaimsChange)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'guests', filter: `bill_id=eq.${billId}` }, onGuestsChange)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bills',  filter: `id=eq.${billId}`      }, onBillChange)
+      .on('postgres_changes', { event: '*', schema: 'tab', table: 'claims', filter: `bill_id=eq.${billId}` }, onClaimsChange)
+      .on('postgres_changes', { event: '*', schema: 'tab', table: 'guests', filter: `bill_id=eq.${billId}` }, onGuestsChange)
+      .on('postgres_changes', { event: '*', schema: 'tab', table: 'bills',  filter: `id=eq.${billId}`      }, onBillChange)
       .subscribe();
   }
 

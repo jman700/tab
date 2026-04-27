@@ -25,6 +25,7 @@ const SYSTEM_PROMPT = `You are a receipt parser. Extract all food and drink item
 Return ONLY a valid JSON object — no markdown, no code fences, no explanation. Use this exact structure:
 {
   "restaurant": "restaurant name if visible, otherwise null",
+  "currency":   "MXN",
   "items": [
     {
       "name":     "item name as printed",
@@ -38,6 +39,7 @@ Return ONLY a valid JSON object — no markdown, no code fences, no explanation.
 }
 
 Rules:
+- "currency" is the ISO 4217 code (e.g. USD, MXN, EUR, GBP, JPY, CAD, AUD, BRL). Detect from currency symbols, words like "pesos", "euros", "yenes", price formatting, or country context. Default to "USD" if genuinely unclear.
 - "price" is the price per unit (not total for the line)
 - "quantity" is the number of units ordered
 - "tax_included" is true only if tax is already baked into item prices (no separate tax line on the receipt)
@@ -103,8 +105,12 @@ export default async function handler(req, res) {
       return res.status(422).json({ error: 'Could not parse receipt — please add items manually' });
     }
 
+    const validCurrencies = ['USD','EUR','GBP','JPY','CAD','AUD','MXN','BRL','INR','CNY','KRW','SGD','HKD','CHF','NOK','SEK','NZD','ZAR','AED','THB','MYR','PHP','IDR','COP','CLP','PEN','ARS'];
+    const detectedCurrency = String(parsed.currency || 'USD').toUpperCase().trim();
+
     const sanitized = {
       restaurant:   parsed.restaurant || null,
+      currency:     validCurrencies.includes(detectedCurrency) ? detectedCurrency : 'USD',
       tax:          parseFloat(parsed.tax)     || 0,
       tax_included: Boolean(parsed.tax_included),
       items: (parsed.items || [])

@@ -93,6 +93,10 @@ CREATE POLICY "public_all" ON tab.items  FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "public_all" ON tab.guests FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "public_all" ON tab.claims FOR ALL USING (true) WITH CHECK (true);
 
+-- ── Migrations ───────────────────────────────────────────────
+-- Run these if you already created the tables above (new columns added later):
+ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'USD';
+
 -- ── Realtime ─────────────────────────────────────────────────
 -- Run these three lines in a separate query after the tables are created.
 -- They add the tables to Supabase's realtime publication so live updates work.

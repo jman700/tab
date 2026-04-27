@@ -59,9 +59,13 @@
 
   <!-- Step 3: Items -->
   <div class="setup-section hidden" id="items-section">
-    <div class="section-head" style="margin-bottom:14px;">
+    <div class="section-head" style="margin-bottom:10px;">
       <h3 style="margin:0;"><span class="step-num">3</span> Review items</h3>
       <button class="btn btn-secondary btn-sm" id="add-item-btn">+ Add Item</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+      <label for="currency-select" style="font-size:13px;color:var(--text-2);white-space:nowrap;flex-shrink:0;">Currency</label>
+      <select class="input" id="currency-select" style="flex:1;padding:6px 10px;font-size:13px;"></select>
     </div>
     <div class="items-table" id="items-table">
       <div class="item-row header-row">
@@ -161,6 +165,7 @@
   let taxAmount    = 0;
   let taxIncluded  = false;
   let isEditMode   = false;
+  let currencyCode = 'USD';
 
   // ── Init ─────────────────────────────────────────────────
   async function init() {
@@ -202,6 +207,17 @@
 
   // ── Events ───────────────────────────────────────────────
   function bindEvents() {
+    // Populate currency selector
+    const sel = $('currency-select');
+    CURRENCIES.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.code;
+      opt.textContent = `${c.code} — ${c.name}`;
+      sel.appendChild(opt);
+    });
+    sel.value = currencyCode;
+    sel.addEventListener('change', () => { currencyCode = sel.value; updateTotals(); });
+
     const uploadArea = $('upload-area');
     const fileInput  = $('receipt-input');
     // click is handled natively by <label for="receipt-input">
@@ -316,6 +332,11 @@
         $('bill-name').value = data.restaurant;
       }
 
+      if (data.currency) {
+        currencyCode = data.currency;
+        $('currency-select').value = currencyCode;
+      }
+
       items = (data.items || []).map((item, i) => ({
         tempId:   `tmp_${i}_${Date.now()}`,
         name:     item.name     || 'Unknown Item',
@@ -426,11 +447,11 @@
     const tip      = subtotal * (tipPct / 100);
     const grand    = subtotal + tax + tip;
 
-    setText('t-subtotal', fmt(subtotal));
-    setText('t-tax',      fmt(tax));
+    setText('t-subtotal', fmtCurrency(subtotal, currencyCode));
+    setText('t-tax',      fmtCurrency(tax,      currencyCode));
     setText('t-tip-pct',  tipPct);
-    setText('t-tip',      fmt(tip));
-    setText('t-total',    fmt(grand));
+    setText('t-tip',      fmtCurrency(tip,      currencyCode));
+    setText('t-total',    fmtCurrency(grand,    currencyCode));
   }
 
   function setActiveTipBtn(pct) {
@@ -471,6 +492,7 @@
           created_by_phone: user.phone,
           created_by_name:  user.name,
           status:           'active',
+          currency:         currencyCode,
           tip_percentage:   tipPct,
           tip_split_type:   tipSplitType,
           subtotal,
@@ -493,6 +515,7 @@
         await db.from('bills').update({
           name,
           status:         'active',
+          currency:        currencyCode,
           tip_percentage:  tipPct,
           tip_split_type:  tipSplitType,
           subtotal,
