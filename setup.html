@@ -148,6 +148,13 @@
     </div>
   </div>
 
+  <div class="field hidden mt-4" id="group-link-field">
+    <label for="bill-group-select">Link to Group <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;">(optional)</span></label>
+    <select class="input" id="bill-group-select" style="padding:9px 12px;font-size:14px;cursor:pointer;">
+      <option value="">No group</option>
+    </select>
+  </div>
+
   <!-- Publish -->
   <button class="btn btn-primary btn-full btn-lg hidden mt-4 mb-16" id="publish-btn">
     Share Bill →
@@ -158,6 +165,7 @@
 <script src="/js/config.js"></script>
 <script src="/js/auth.js"></script>
 <script src="/js/utils.js"></script>
+<script src="/js/groups.js"></script>
 <script>
   const user = Auth.requireAuth();
   if (!user) throw new Error('Not authenticated');
@@ -177,7 +185,22 @@
   let currencyCode        = 'USD';
 
   // ── Init ─────────────────────────────────────────────────
+  async function loadGroupOptions() {
+    const { data } = await Groups.getMyGroups(user.phone);
+    if (!data || data.length === 0) return;
+    const field = $('group-link-field');
+    const sel   = $('bill-group-select');
+    data.forEach(g => {
+      const opt = document.createElement('option');
+      opt.value       = g.id;
+      opt.textContent = g.name;
+      sel.appendChild(opt);
+    });
+    field.classList.remove('hidden');
+  }
+
   async function init() {
+    loadGroupOptions();
     try {
       const pathId = getBillIdFromUrl();
       const isEditId = pathId && !pathId.includes('.') && pathId !== 'setup';
@@ -620,12 +643,14 @@
       };
 
       if (!isEditMode) {
+        const groupId = $('bill-group-select').value || null;
         const { error: bErr } = await db.from('bills').insert({
           id:               billId,
           ...billPayload,
           created_by_phone: user.phone,
           created_by_name:  user.name,
           status:           'active',
+          group_id:         groupId,
         });
         if (bErr) throw bErr;
 
