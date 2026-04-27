@@ -211,7 +211,7 @@
   let myGuest  = null;
   let guestsVisible  = false;
   let billCurrency   = 'USD';
-  let showConverted  = false;
+  let showConverted  = true;
   let exchangeRate   = null;
   let kioskGuest     = null;
   let pendingGuests  = [];
@@ -281,18 +281,10 @@
 
     const toggleEl = $('currency-toggle');
     toggleEl.innerHTML = `
-      <button class="toggle-btn active" id="btn-orig">${billCurrency}</button>
-      <button class="toggle-btn" id="btn-usd">USD</button>
+      <button class="toggle-btn active" id="btn-usd">USD</button>
+      <button class="toggle-btn" id="btn-orig">${billCurrency}</button>
     `;
     show(toggleEl);
-
-    $('btn-orig').addEventListener('click', () => {
-      showConverted = false;
-      $('btn-orig').classList.add('active');
-      $('btn-usd').classList.remove('active');
-      hide($('rate-note'));
-      renderItems(); renderMyTotal(); renderGuests();
-    });
 
     $('btn-usd').addEventListener('click', () => {
       if (!exchangeRate) return showToast('Exchange rate unavailable — try again shortly', 'error');
@@ -303,10 +295,21 @@
       renderItems(); renderMyTotal(); renderGuests();
     });
 
+    $('btn-orig').addEventListener('click', () => {
+      showConverted = false;
+      $('btn-orig').classList.add('active');
+      $('btn-usd').classList.remove('active');
+      hide($('rate-note'));
+      renderItems(); renderMyTotal(); renderGuests();
+    });
+
     getExchangeRate(billCurrency, 'USD').then(rate => {
       exchangeRate = rate;
       if (rate) {
         setText('rate-note', `1 ${billCurrency} = ${fmtCurrency(rate, 'USD')} · Frankfurter / ECB`);
+        if (showConverted) {
+          renderItems(); renderMyTotal(); renderGuests();
+        }
       }
     });
   }
