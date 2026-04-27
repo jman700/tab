@@ -203,6 +203,43 @@ const Groups = (() => {
     return { data: data || [] };
   }
 
+  async function closeGroup(groupId, reopen = false) {
+    const { error } = await db
+      .from('groups')
+      .update({ closed_at: reopen ? null : new Date().toISOString() })
+      .eq('id', groupId);
+    if (error) return { error };
+    return {};
+  }
+
+  async function deleteGroup(groupId) {
+    // Delete child records first, then the group row.
+    // Bills keep their data but lose the group link.
+    const expRes = await db.from('expenses').select('id').eq('group_id', groupId);
+    if (expRes.error) return { error: expRes.error };
+    const expIds = (expRes.data || []).map(e => e.id);
+
+    if (expIds.length > 0) {
+      const { error: splitsErr } = await db.from('expense_splits').delete().in('expense_id', expIds);
+      if (splitsErr) return { error: splitsErr };
+    }
+    const steps = [
+      db.from('expenses').delete().eq('group_id', groupId),
+      db.from('settlements').delete().eq('group_id', groupId),
+      db.from('group_members').delete().eq('group_id', groupId),
+    ];
+    for (const step of steps) {
+      const { error } = await step;
+      if (error) return { error };
+    }
+    // Detach any bills that referenced this group
+    await db.from('bills').update({ group_id: null }).eq('group_id', groupId);
+
+    const { error } = await db.from('groups').delete().eq('id', groupId);
+    if (error) return { error };
+    return {};
+  }
+
   return {
     createGroup,
     getMyGroups,
@@ -215,5 +252,7 @@ const Groups = (() => {
     getBillsForGroup,
     addSettlement,
     getSettlements,
+    closeGroup,
+    deleteGroup,
   };
 })();

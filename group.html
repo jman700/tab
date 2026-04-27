@@ -20,7 +20,10 @@
       </svg>
       tab
     </a>
-    <button class="btn btn-secondary btn-sm" id="invite-btn">Invite</button>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <button class="btn btn-secondary btn-sm" id="invite-btn">Invite</button>
+      <button class="btn btn-ghost btn-sm hidden" id="settings-btn" style="padding:6px 10px;" title="Group settings">⚙</button>
+    </div>
   </div>
 </header>
 
@@ -28,6 +31,7 @@
   <h1 id="group-name">Loading…</h1>
   <p id="group-meta" style="font-size:14px;color:var(--text-muted);margin-top:4px;"></p>
 </div>
+<div id="closed-banner" class="hidden" style="background:var(--surface-2);border-bottom:1px solid var(--border);text-align:center;padding:8px 16px;font-size:13px;color:var(--text-muted);">This group is closed</div>
 
 <main class="container page" id="main" style="padding-top:0;">
 
@@ -71,14 +75,20 @@
 
 </main>
 
-<!-- Add Expense Sheet (populated in Task 5) -->
+<!-- Add Expense Sheet -->
 <div class="sheet-backdrop" id="expense-backdrop" style="display:none;"></div>
 <div class="sheet" id="expense-sheet" style="display:none;">
   <div class="sheet-handle"></div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
     <h2 style="margin:0;">Add Expense</h2>
-    <button class="btn btn-ghost btn-sm" id="close-expense-btn">✕</button>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button class="btn btn-secondary btn-sm" id="scan-receipt-btn">📷 Scan</button>
+      <button class="btn btn-ghost btn-sm" id="close-expense-btn">✕</button>
+    </div>
   </div>
+  <input type="file" id="exp-scan-input" accept="image/*" style="display:none;" />
+  <div id="exp-scanning-state" style="display:none;text-align:center;padding:16px 0;font-size:14px;color:var(--text-muted);">Scanning receipt with AI…</div>
+  <div id="exp-items-preview" style="display:none;background:var(--surface-2);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;font-size:13px;"></div>
 
   <div class="field">
     <label for="exp-description">Description</label>
@@ -145,6 +155,18 @@
   <button class="btn btn-primary btn-full mt-16" id="record-settle-btn">Mark as Settled</button>
 </div>
 
+<!-- Settings Sheet -->
+<div class="sheet-backdrop" id="settings-backdrop" style="display:none;"></div>
+<div class="sheet" id="settings-sheet" style="display:none;">
+  <div class="sheet-handle"></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <h2 style="margin:0;">Group Settings</h2>
+    <button class="btn btn-ghost btn-sm" id="close-settings-btn">✕</button>
+  </div>
+  <button class="btn btn-secondary btn-full" id="toggle-close-btn" style="margin-bottom:12px;"></button>
+  <button class="btn btn-full" id="delete-group-btn" style="background:var(--danger,#c0392b);color:#fff;border:none;border-radius:var(--radius-sm);padding:12px;font-size:15px;font-weight:500;cursor:pointer;"></button>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="/js/config.js"></script>
 <script src="/js/auth.js"></script>
@@ -201,6 +223,18 @@
       document.title = `Tab — ${g.name}`;
       setText('group-name', g.name);
       setText('group-meta', `${members.length} member${members.length !== 1 ? 's' : ''}`);
+
+      if (g.closed_at) {
+        show($('closed-banner'));
+        $('add-expense-btn').disabled = true;
+        $('add-expense-btn').textContent = 'Group Closed';
+      }
+
+      if (g.created_by === user.phone) {
+        show($('settings-btn'));
+        $('toggle-close-btn').textContent = g.closed_at ? 'Reopen Group' : 'Close Group';
+        $('delete-group-btn').textContent = 'Delete Group';
+      }
 
       renderMembers();
       await loadExpenses();
@@ -541,6 +575,9 @@
     $('exp-description').value = '';
     $('exp-amount').value      = '';
     $('exp-note').value        = '';
+    $('exp-scan-input').value  = '';
+    $('exp-scanning-state').style.display = 'none';
+    $('exp-items-preview').style.display  = 'none';
     renderSplitInputs();
     openSheet('expense-backdrop', 'expense-sheet');
     setTimeout(() => $('exp-description').focus(), 320);
@@ -762,6 +799,140 @@
     } finally {
       btn.disabled    = false;
       btn.textContent = 'Mark as Settled';
+    }
+  });
+
+  // ── Settings Sheet ────────────────────────────────────────
+  $('settings-btn').addEventListener('click',       () => openSheet('settings-backdrop', 'settings-sheet'));
+  $('close-settings-btn').addEventListener('click', () => closeSheet('settings-backdrop', 'settings-sheet'));
+  $('settings-backdrop').addEventListener('click',  () => closeSheet('settings-backdrop', 'settings-sheet'));
+
+  $('toggle-close-btn').addEventListener('click', async () => {
+    const btn = $('toggle-close-btn');
+    const closing = !group.closed_at;
+    btn.disabled = true;
+    btn.textContent = closing ? 'Closing…' : 'Reopening…';
+    try {
+      const { error } = await Groups.closeGroup(groupId, !closing);
+      if (error) { showToast('Could not update group', 'error'); return; }
+      closeSheet('settings-backdrop', 'settings-sheet');
+      if (closing) {
+        group.closed_at = new Date().toISOString();
+        show($('closed-banner'));
+        $('add-expense-btn').disabled = true;
+        $('add-expense-btn').textContent = 'Group Closed';
+        showToast('Group closed', 'success');
+      } else {
+        group.closed_at = null;
+        hide($('closed-banner'));
+        $('add-expense-btn').disabled = false;
+        $('add-expense-btn').textContent = '+ Add Expense';
+        showToast('Group reopened', 'success');
+      }
+      btn.textContent = group.closed_at ? 'Reopen Group' : 'Close Group';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  let deleteConfirmPending = false;
+  let deleteConfirmTimer   = null;
+
+  $('delete-group-btn').addEventListener('click', async () => {
+    const btn = $('delete-group-btn');
+    if (!deleteConfirmPending) {
+      deleteConfirmPending = true;
+      btn.textContent = 'Tap again to confirm delete';
+      btn.style.background = '#7b1d1d';
+      deleteConfirmTimer = setTimeout(() => {
+        deleteConfirmPending = false;
+        btn.textContent = 'Delete Group';
+        btn.style.background = '';
+      }, 4000);
+      return;
+    }
+    clearTimeout(deleteConfirmTimer);
+    deleteConfirmPending = false;
+    btn.disabled = true;
+    btn.textContent = 'Deleting…';
+    try {
+      const { error } = await Groups.deleteGroup(groupId);
+      if (error) { showToast('Could not delete group', 'error'); btn.disabled = false; btn.textContent = 'Delete Group'; return; }
+      navigateTo('/dashboard.html');
+    } catch (err) {
+      showToast('Could not delete group', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Delete Group';
+    }
+  });
+
+  // ── Receipt OCR ───────────────────────────────────────────
+  $('scan-receipt-btn').addEventListener('click', () => $('exp-scan-input').click());
+
+  $('exp-scan-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    $('exp-scanning-state').style.display = 'block';
+    $('exp-items-preview').style.display  = 'none';
+    $('scan-receipt-btn').disabled = true;
+
+    try {
+      let base64, mediaType;
+      try {
+        base64    = await compressImage(file);
+        mediaType = 'image/jpeg';
+      } catch {
+        base64    = await fileToBase64(file);
+        mediaType = file.type || 'image/jpeg';
+      }
+
+      const res = await fetch('/api/parse-receipt', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ image: base64, mediaType }),
+      });
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      if (data.restaurant && !$('exp-description').value.trim()) {
+        $('exp-description').value = data.restaurant;
+      }
+      if (data.currency) $('exp-currency').value = data.currency;
+
+      const items = data.items || [];
+      const tax   = parseFloat(data.tax) || 0;
+      const total = items.reduce((s, it) => s + (parseFloat(it.price) || 0) * (parseInt(it.quantity, 10) || 1), 0) + tax;
+      if (total > 0 && !$('exp-amount').value) {
+        $('exp-amount').value = total.toFixed(2);
+        renderSplitInputs();
+      }
+
+      if (items.length > 0) {
+        const rows = items.map(it => {
+          const qty = parseInt(it.quantity, 10) || 1;
+          const price = (parseFloat(it.price) || 0).toFixed(2);
+          return `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border);">
+            <span>${escHtml(it.name)}${qty > 1 ? ` ×${qty}` : ''}</span>
+            <span style="font-weight:500;">${data.currency || 'USD'} ${price}</span>
+          </div>`;
+        }).join('');
+        const taxLine = tax > 0
+          ? `<div style="display:flex;justify-content:space-between;padding:3px 0;color:var(--text-muted);"><span>Tax</span><span>${data.currency || 'USD'} ${tax.toFixed(2)}</span></div>`
+          : '';
+        setHTML('exp-items-preview', `<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:6px;">Receipt Items</div>${rows}${taxLine}`);
+        $('exp-items-preview').style.display = 'block';
+      }
+
+      showToast('Receipt scanned!', 'success');
+    } catch (err) {
+      console.error('Receipt scan failed:', err);
+      showToast(`Scan failed: ${err.message || 'unknown error'}`, 'error');
+    } finally {
+      $('exp-scanning-state').style.display = 'none';
+      $('scan-receipt-btn').disabled = false;
+      $('exp-scan-input').value = '';
     }
   });
 

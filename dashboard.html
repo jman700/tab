@@ -81,13 +81,13 @@
   <!-- Groups -->
   <div id="groups-section" class="mt-24">
     <div class="section-divider"><h2>Groups</h2></div>
-    <div id="groups-list" style="margin-top:12px;">
+    <button class="btn btn-secondary btn-full" style="margin-bottom:12px;" id="new-group-btn">+ New Group</button>
+    <div id="groups-list">
       <div class="bill-card-skeleton">
         <div class="skeleton" style="height:18px;width:45%;margin-bottom:10px;"></div>
         <div class="skeleton" style="height:13px;width:28%;"></div>
       </div>
     </div>
-    <button class="btn btn-secondary btn-full mt-16" id="new-group-btn">+ New Group</button>
   </div>
 
 </main>
@@ -300,14 +300,18 @@
   }
 
   function renderGroupCard(group) {
+    const closed = !!group.closed_at;
+    const badge  = closed
+      ? '<span class="badge badge-closed">Closed</span>'
+      : '<span class="badge badge-active">Group</span>';
     return `
-      <div class="bill-card fade-up group-card" data-id="${escHtml(group.id)}" style="cursor:pointer;">
+      <div class="bill-card fade-up group-card" data-id="${escHtml(group.id)}" style="cursor:pointer;${closed ? 'opacity:0.7;' : ''}">
         <div class="bill-card-top">
           <div class="bill-card-name">${escHtml(group.name)}</div>
-          <span class="badge badge-active">Group</span>
+          ${badge}
         </div>
         <div class="bill-card-meta">
-          <span>Created ${formatDateShort(group.created_at)}</span>
+          <span>${closed ? 'Closed ' + formatDateShort(group.closed_at) : 'Created ' + formatDateShort(group.created_at)}</span>
         </div>
       </div>
     `;
