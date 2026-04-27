@@ -95,7 +95,12 @@ CREATE POLICY "public_all" ON tab.claims FOR ALL USING (true) WITH CHECK (true);
 
 -- ── Migrations ───────────────────────────────────────────────
 -- Run these if you already created the tables above (new columns added later):
-ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'USD';
+ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS currency      TEXT    DEFAULT 'USD';
+ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS receipt_urls TEXT[]  DEFAULT '{}';
+
+-- Storage bucket (run in Supabase dashboard → Storage, or via SQL):
+-- 1. Create a bucket named "receipts" and set it to Public.
+-- 2. No extra RLS needed for a public bucket.
 
 -- ── Realtime ─────────────────────────────────────────────────
 -- Run these three lines in a separate query after the tables are created.

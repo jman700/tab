@@ -49,8 +49,10 @@
       <p>Tap to upload a receipt photo</p>
       <span>JPG, PNG, HEIC supported</span>
     </label>
+    <div class="photo-strip hidden" id="photo-strip"></div>
     <img id="receipt-preview" class="upload-preview hidden" alt="Receipt" />
     <button class="btn btn-primary btn-full mt-8 hidden" id="scan-btn">Scan Receipt →</button>
+    <button class="btn btn-secondary btn-sm mt-8 hidden" id="add-photo-btn">+ Add another photo</button>
     <div class="processing hidden" id="processing-state">
       <div class="spinner"></div>
       Scanning receipt with AI…
@@ -161,16 +163,18 @@
   if (!user) throw new Error('Not authenticated');
 
   // ── State ────────────────────────────────────────────────
-  let billId        = null;
-  let items         = [];
-  let tipPct        = 20;
-  let tipIsFixed    = false;
-  let tipFixedAmt   = 0;
-  let tipSplitType  = 'proportional';
-  let taxAmount     = 0;
-  let taxIncluded   = false;
-  let isEditMode    = false;
-  let currencyCode  = 'USD';
+  let billId              = crypto.randomUUID();
+  let photos              = []; // { file, previewUrl, scanned }
+  let existingReceiptUrls = [];
+  let items               = [];
+  let tipPct              = 20;
+  let tipIsFixed          = false;
+  let tipFixedAmt         = 0;
+  let tipSplitType        = 'proportional';
+  let taxAmount           = 0;
+  let taxIncluded         = false;
+  let isEditMode          = false;
+  let currencyCode        = 'USD';
 
   // ── Init ─────────────────────────────────────────────────
   async function init() {
@@ -194,6 +198,8 @@
     const { data: bill, error } = await db.from('bills').select('*').eq('id', id).single();
     if (error || !bill) { showToast('Bill not found', 'error'); return; }
     if (bill.created_by_phone !== user.phone) { navigateTo('/dashboard.html'); return; }
+
+    existingReceiptUrls = bill.receipt_urls || [];
 
     $('bill-name').value = bill.name;
     tipPct               = bill.tip_percentage || 20;
@@ -240,6 +246,7 @@
     });
 
     $('scan-btn').addEventListener('click', scanReceipt);
+    $('add-photo-btn').addEventListener('click', () => $('receipt-input').click());
 
     $('add-item-btn').addEventListener('click', addBlankItem);
 
@@ -314,8 +321,6 @@
   }
 
   // ── File handling + OCR ───────────────────────────────────
-  let selectedFile = null;
-
   function selectFile(file) {
     if (!file) return;
     if (file.type && !file.type.startsWith('image/')) {
@@ -323,30 +328,54 @@
       return;
     }
 
-    selectedFile = file;
+    const previewUrl = URL.createObjectURL(file);
+    photos.push({ file, previewUrl, scanned: false });
+
     const preview = $('receipt-preview');
-    preview.src = URL.createObjectURL(file);
+    preview.src = previewUrl;
     show(preview);
-    show($('scan-btn'));
+
+    const scanBtn = $('scan-btn');
+    scanBtn.textContent = photos.length > 1 ? 'Scan Next Photo →' : 'Scan Receipt →';
+    show(scanBtn);
+
     hide($('upload-area'));
+    hide($('add-photo-btn'));
+    renderPhotoStrip();
+  }
+
+  function renderPhotoStrip() {
+    const strip = $('photo-strip');
+    if (photos.length === 0) { strip.classList.add('hidden'); return; }
+    strip.classList.remove('hidden');
+    strip.innerHTML = photos.map(p => `
+      <div class="photo-thumb ${p.scanned ? 'scanned' : ''}">
+        <img src="${p.previewUrl}" alt="Receipt photo" />
+        ${p.scanned ? '<div class="photo-thumb-check">✓</div>' : ''}
+      </div>
+    `).join('');
   }
 
   async function scanReceipt() {
-    if (!selectedFile) return;
+    const photoIdx = photos.findIndex(p => !p.scanned);
+    if (photoIdx === -1) return;
+    const photo = photos[photoIdx];
+    const isFirst = photoIdx === 0 && items.length === 0;
 
     const scanBtn = $('scan-btn');
     hide(scanBtn);
+    hide($('receipt-preview'));
     show($('processing-state'));
 
     try {
       let base64, mediaType;
       try {
-        base64    = await compressImage(selectedFile);
+        base64    = await compressImage(photo.file);
         mediaType = 'image/jpeg';
       } catch (compressErr) {
         console.warn('Compression failed, sending raw:', compressErr);
-        base64    = await fileToBase64(selectedFile);
-        mediaType = selectedFile.type || 'image/jpeg';
+        base64    = await fileToBase64(photo.file);
+        mediaType = photo.file.type || 'image/jpeg';
       }
 
       const res = await fetch('/api/parse-receipt', {
@@ -363,38 +392,49 @@
       const data = await res.json();
       if (data.error) throw new Error(data.error);
 
-      if (data.restaurant && !$('bill-name').value.trim()) {
-        $('bill-name').value = data.restaurant;
+      // Only pull restaurant/currency/tax from the first photo
+      if (isFirst) {
+        if (data.restaurant && !$('bill-name').value.trim()) {
+          $('bill-name').value = data.restaurant;
+        }
+        if (data.currency) {
+          currencyCode = data.currency;
+          $('currency-select').value = currencyCode;
+        }
+        taxAmount   = toNum(data.tax) || 0;
+        taxIncluded = data.tax_included || false;
+        $('tax-input').value = taxAmount.toFixed(2);
+        $('tax-note').textContent = taxIncluded
+          ? 'Tax is included in item prices above.'
+          : 'Tax shown separately on receipt.';
       }
 
-      if (data.currency) {
-        currencyCode = data.currency;
-        $('currency-select').value = currencyCode;
-      }
-
-      items = (data.items || []).map((item, i) => ({
-        tempId:   `tmp_${i}_${Date.now()}`,
+      // Merge items from this photo into the running list
+      const newItems = (data.items || []).map((item, i) => ({
+        tempId:   `tmp_${photoIdx}_${i}_${Date.now()}`,
         name:     item.name     || 'Unknown Item',
         price:    toNum(item.price),
         quantity: toNum(item.quantity, 1),
         note:     item.note     || '',
-        position: i,
+        position: items.length + i,
       }));
+      items = [...items, ...newItems];
 
-      taxAmount   = toNum(data.tax) || 0;
-      taxIncluded = data.tax_included || false;
-      $('tax-input').value = taxAmount.toFixed(2);
-      $('tax-note').textContent = taxIncluded
-        ? 'Tax is included in item prices above.'
-        : 'Tax shown separately on receipt.';
-
+      photos[photoIdx].scanned = true;
+      renderPhotoStrip();
       renderItems();
       showPostUploadSections();
       updateTotals();
-      showToast('Receipt scanned!', 'success');
+
+      const remaining = photos.filter(p => !p.scanned).length;
+      showToast(remaining > 0 ? `Photo ${photoIdx + 1} scanned — ${remaining} remaining` : 'Receipt scanned!', 'success');
+
+      // Offer to add another photo
+      show($('add-photo-btn'));
 
     } catch (err) {
       console.error('Receipt scan failed:', err);
+      show($('receipt-preview'));
       show(scanBtn);
       showToast(`Scan failed: ${err.message || 'unknown error'} — add items manually`, 'error');
       showPostUploadSections();
@@ -509,6 +549,14 @@
       .forEach(id => show($(id)));
   }
 
+  // ── Helpers ───────────────────────────────────────────────
+  function base64ToBlob(b64, type) {
+    const binary = atob(b64);
+    const arr    = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+    return new Blob([arr], { type });
+  }
+
   // ── Publish ───────────────────────────────────────────────
   async function publishBill() {
     const name = $('bill-name').value.trim();
@@ -520,29 +568,58 @@
     btn.textContent = 'Saving…';
 
     try {
-      const subtotal       = getSubtotal();
-      const tax            = taxIncluded ? 0 : taxAmount;
-      const tip            = tipIsFixed ? tipFixedAmt : subtotal * (tipPct / 100);
+      const subtotal        = getSubtotal();
+      const tax             = taxIncluded ? 0 : taxAmount;
+      const tip             = tipIsFixed ? tipFixedAmt : subtotal * (tipPct / 100);
       const effectiveTipPct = subtotal > 0 ? (tip / subtotal) * 100 : tipPct;
-      const grand          = subtotal + tax + tip;
+      const grand           = subtotal + tax + tip;
 
-      if (!billId) {
-        const { data: bill, error: bErr } = await db.from('bills').insert({
-          name,
+      // Upload any new photos to Supabase Storage
+      const receiptUrls = [...existingReceiptUrls];
+      for (let i = 0; i < photos.length; i++) {
+        try {
+          let blob;
+          try {
+            const b64 = await compressImage(photos[i].file);
+            blob      = base64ToBlob(b64, 'image/jpeg');
+          } catch {
+            blob = photos[i].file;
+          }
+          const path = `${billId}/${existingReceiptUrls.length + i}.jpg`;
+          const { error: upErr } = await db.storage.from('receipts').upload(path, blob, {
+            contentType: 'image/jpeg',
+            upsert: true,
+          });
+          if (!upErr) {
+            const { data: urlData } = db.storage.from('receipts').getPublicUrl(path);
+            receiptUrls.push(urlData.publicUrl);
+          }
+        } catch (e) {
+          console.warn('Photo upload failed for photo', i, e);
+        }
+      }
+
+      const billPayload = {
+        name,
+        currency:       currencyCode,
+        tip_percentage: effectiveTipPct,
+        tip_split_type: tipSplitType,
+        subtotal,
+        tax_amount:     taxAmount,
+        tax_included:   taxIncluded,
+        grand_total:    grand,
+        receipt_urls:   receiptUrls,
+      };
+
+      if (!isEditMode) {
+        const { error: bErr } = await db.from('bills').insert({
+          id:               billId,
+          ...billPayload,
           created_by_phone: user.phone,
           created_by_name:  user.name,
           status:           'active',
-          currency:         currencyCode,
-          tip_percentage:   effectiveTipPct,
-          tip_split_type:   tipSplitType,
-          subtotal,
-          tax_amount:       taxAmount,
-          tax_included:     taxIncluded,
-          grand_total:      grand,
-        }).select().single();
-
+        });
         if (bErr) throw bErr;
-        billId = bill.id;
 
         const { error: gErr } = await db.from('guests').insert({
           bill_id:            billId,
@@ -552,17 +629,11 @@
         });
         if (gErr) throw gErr;
       } else {
-        await db.from('bills').update({
-          name,
-          status:         'active',
-          currency:        currencyCode,
-          tip_percentage:  effectiveTipPct,
-          tip_split_type:  tipSplitType,
-          subtotal,
-          tax_amount:      taxAmount,
-          tax_included:    taxIncluded,
-          grand_total:     grand,
+        const { error: bErr } = await db.from('bills').update({
+          ...billPayload,
+          status: 'active',
         }).eq('id', billId);
+        if (bErr) throw bErr;
 
         await db.from('items').delete().eq('bill_id', billId);
       }
