@@ -40,12 +40,13 @@ const Groups = (() => {
 
   async function getGroup(id) {
     const { data, error } = await db
-      .from('groups')
-      .select('*')
-      .eq('id', id)
-      .single();
+      .from('group_members')
+      .select('groups(*)')
+      .eq('group_id', id)
+      .limit(1)
+      .maybeSingle();
     if (error) return { error };
-    return { data };
+    return { data: data?.groups || null };
   }
 
   async function getMembers(groupId) {
