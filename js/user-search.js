@@ -8,6 +8,7 @@
 function attachUserSearch(nameInput, phoneInput) {
   let dropdown     = null;
   let debounceTimer = null;
+  let searchGen    = 0;
 
   function removeDropdown() {
     if (dropdown) { dropdown.remove(); dropdown = null; }
@@ -39,7 +40,7 @@ function attachUserSearch(nameInput, phoneInput) {
         phoneInput.value = Auth.formatPhone(u.phone);
         removeDropdown();
         // Trigger the phone formatter if one is attached
-        phoneInput.dispatchEvent(new Event('input'));
+        phoneInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
       });
 
       dropdown.appendChild(item);
@@ -49,13 +50,14 @@ function attachUserSearch(nameInput, phoneInput) {
   }
 
   async function search(query) {
+    const gen = ++searchGen;
     const { data, error } = await db
       .from('users')
       .select('name, phone')
       .ilike('name', `%${query}%`)
       .order('name')
       .limit(5);
-    if (error || !data) return;
+    if (gen !== searchGen || error || !data) return;
     showDropdown(data);
   }
 
