@@ -115,6 +115,10 @@ ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS currency      TEXT    DEFAULT 'US
 ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS receipt_urls  TEXT[]  DEFAULT '{}';
 ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS paid_by_phone TEXT;
 
+-- Groups schema (run once if adding groups to an existing install):
+-- ALTER TABLE tab.groups ADD COLUMN IF NOT EXISTS ...  (see HANDOFF.md)
+ALTER TABLE tab.expenses ADD COLUMN IF NOT EXISTS expense_date DATE;
+
 -- Storage bucket setup:
 -- 1. Create a bucket named "receipts" and set it to Public (allows public reads).
 -- 2. Run these policies so the anon key can upload from the browser:
