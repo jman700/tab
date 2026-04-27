@@ -311,6 +311,7 @@
           show($('rate-note'));
           renderItems(); renderMyTotal(); renderGuests();
         }
+        if ($('summary-sheet').classList.contains('visible')) renderSummary();
       }
     });
   }
