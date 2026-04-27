@@ -956,22 +956,34 @@
     // Venmo pay button — shown when the payer has Venmo set and the viewer isn't the payer
     const myShare   = getPersonShare(user.phone, claims, items, guests, bill);
     if (payerVenmo && user.phone !== paidByPhone && myShare > 0) {
-      const payerName = guests.find(g => g.phone === paidByPhone)?.name || 'the bill payer';
-      const rawAmt    = showConverted && exchangeRate ? myShare * exchangeRate : myShare;
-      const venmoAmt  = rawAmt.toFixed(2);
-      const venmoNote = encodeURIComponent(bill.name);
-      const venmoUrl  = `venmo://paycharge?txn=pay&recipients=${encodeURIComponent(payerVenmo)}&amount=${venmoAmt}&note=${venmoNote}`;
-      setHTML('venmo-pay-wrap', `
-        <div style="margin-top:20px;padding:16px;background:var(--surface-2);border-radius:var(--radius);text-align:center;">
-          <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">
-            Pay <strong style="color:var(--text);">@${escHtml(payerVenmo)}</strong> (${escHtml(payerName)})
-          </p>
-          <a href="${venmoUrl}" class="btn btn-primary btn-full" style="text-decoration:none;display:block;">
-            Pay ${display(myShare)} on Venmo
-          </a>
-          <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">Opens the Venmo app with your amount pre-filled.</p>
-        </div>
-      `);
+      const payerName  = guests.find(g => g.phone === paidByPhone)?.name || 'the bill payer';
+      const isNonUSD   = billCurrency !== 'USD';
+      const venmoNote  = encodeURIComponent(bill.name);
+
+      if (isNonUSD && !exchangeRate) {
+        setHTML('venmo-pay-wrap', `
+          <div style="margin-top:20px;padding:16px;background:var(--surface-2);border-radius:var(--radius);text-align:center;">
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:6px;">
+              Pay <strong style="color:var(--text);">@${escHtml(payerVenmo)}</strong> (${escHtml(payerName)})
+            </p>
+            <p style="font-size:12px;color:var(--text-muted);">Exchange rate unavailable — open Venmo manually.</p>
+          </div>
+        `);
+      } else {
+        const venmoUsdAmt = isNonUSD ? (myShare * exchangeRate).toFixed(2) : myShare.toFixed(2);
+        const venmoUrl    = `venmo://paycharge?txn=pay&recipients=${encodeURIComponent(payerVenmo)}&amount=${venmoUsdAmt}&note=${venmoNote}`;
+        setHTML('venmo-pay-wrap', `
+          <div style="margin-top:20px;padding:16px;background:var(--surface-2);border-radius:var(--radius);text-align:center;">
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">
+              Pay <strong style="color:var(--text);">@${escHtml(payerVenmo)}</strong> (${escHtml(payerName)})
+            </p>
+            <a href="${venmoUrl}" class="btn btn-primary btn-full" style="text-decoration:none;display:block;">
+              Pay $${venmoUsdAmt} on Venmo
+            </a>
+            <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">Opens the Venmo app with your amount pre-filled.</p>
+          </div>
+        `);
+      }
     } else {
       setHTML('venmo-pay-wrap', '');
     }
