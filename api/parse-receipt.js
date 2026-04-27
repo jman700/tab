@@ -7,6 +7,15 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 
+// Raise Vercel's default 4.5 MB body limit — base64 phone photos can hit 6–8 MB
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '12mb',
+    },
+  },
+};
+
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });

@@ -16,7 +16,13 @@
 <header class="header">
   <div class="header-inner">
     <button class="btn btn-ghost btn-sm" id="back-btn">← Back</button>
-    <a href="/dashboard.html" class="brand">T<em>a</em>b</a>
+    <a href="/dashboard.html" class="brand">
+      <svg width="16" height="19" viewBox="0 0 30 36" fill="none" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="27" height="30" rx="3" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M7 12h16M7 18h16M7 24h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      tab
+    </a>
     <div style="width:72px;"></div>
   </div>
 </header>
@@ -36,12 +42,13 @@
   <!-- Step 2: Receipt Upload -->
   <div class="setup-section" id="upload-section">
     <h3><span class="step-num">2</span> Upload receipt</h3>
-    <div class="upload-area" id="upload-area">
+    <label class="upload-area" id="upload-area" for="receipt-input">
       <div class="upload-icon">📸</div>
       <p>Tap to upload a receipt photo</p>
       <span>JPG, PNG, HEIC supported</span>
-      <input type="file" id="receipt-input" accept="image/*" hidden />
-    </div>
+    </label>
+    <input type="file" id="receipt-input" accept="image/*"
+           style="position:absolute;opacity:0;width:1px;height:1px;" />
     <div class="processing hidden" id="processing-state">
       <div class="spinner"></div>
       Scanning receipt with AI…
@@ -193,7 +200,7 @@
 
     const uploadArea = $('upload-area');
     const fileInput  = $('receipt-input');
-    uploadArea.addEventListener('click', () => fileInput.click());
+    // click is handled natively by <label for="receipt-input">
     uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('drag-over'); });
     uploadArea.addEventListener('dragleave', ()  => uploadArea.classList.remove('drag-over'));
     uploadArea.addEventListener('drop', e => {
@@ -259,11 +266,11 @@
     hide($('upload-area'));
 
     try {
-      const base64 = await fileToBase64(file);
+      const base64 = await compressImage(file);
       const res    = await fetch('/api/parse-receipt', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ image: base64, mediaType: file.type }),
+        body:    JSON.stringify({ image: base64, mediaType: 'image/jpeg' }),
       });
 
       if (!res.ok) throw new Error('OCR failed');
@@ -305,12 +312,23 @@
     }
   }
 
-  function fileToBase64(file) {
+  // Resize + compress to JPEG before sending — keeps payload well under Vercel's limit
+  // and speeds up the Claude Vision call. Max 1600px on longest side, 82% quality.
+  function compressImage(file, maxPx = 1600, quality = 0.82) {
     return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload  = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const scale   = Math.min(1, maxPx / Math.max(img.width, img.height));
+        const canvas  = document.createElement('canvas');
+        canvas.width  = Math.round(img.width  * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality).split(',')[1]);
+      };
+      img.onerror = reject;
+      img.src = url;
     });
   }
 
