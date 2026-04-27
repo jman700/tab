@@ -113,8 +113,8 @@
     } catch { /* non-critical */ }
 
     const returnUrl = sessionStorage.getItem('tab_return_url');
-    if (returnUrl) {
-      sessionStorage.removeItem('tab_return_url');
+    sessionStorage.removeItem('tab_return_url');
+    if (returnUrl && returnUrl.startsWith('/') && !returnUrl.startsWith('//')) {
       window.location.replace(returnUrl);
     } else {
       window.location.replace('/dashboard.html');

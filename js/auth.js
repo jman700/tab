@@ -44,7 +44,9 @@ const Auth = (() => {
   function requireAuth() {
     const user = getUser();
     if (!user) {
-      sessionStorage.setItem('tab_return_url', window.location.href);
+      if (window.location.pathname !== '/') {
+        sessionStorage.setItem('tab_return_url', window.location.href);
+      }
       window.location.href = '/';
       return null;
     }
