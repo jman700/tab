@@ -589,11 +589,13 @@
   });
 
   function buildReceiptCanvas() {
-    const currency = bill.currency || 'USD';
-    const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
-    const tax      = bill.tax_included ? 0 : (bill.tax_amount || 0);
-    const tip      = subtotal * ((bill.tip_percentage || 0) / 100);
-    const money    = n => fmtCurrency(n, currency);
+    const converting = showConverted && exchangeRate;
+    const currency   = converting ? 'USD' : (bill.currency || 'USD');
+    const conv       = n => converting ? (n || 0) * exchangeRate : (n || 0);
+    const subtotal   = items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const tax        = bill.tax_included ? 0 : (bill.tax_amount || 0);
+    const tip        = subtotal * ((bill.tip_percentage || 0) / 100);
+    const money      = n => fmtCurrency(conv(n), currency);
 
     const W   = 360;
     const P   = 24;
@@ -691,12 +693,15 @@
     if (tip > 0) { totRow(`Tip (${bill.tip_percentage}%)`, tip, y); y += 20; }
 
     y += 10; thickLine(y); y += 2 + 8;
-    draw('TOTAL',              P,     y + 20, sans(14, true), ACCENT);
-    draw(money(bill.grand_total), W - P, y + 20, sans(14, true), ACCENT, 'right');
+    draw('TOTAL',                    P,     y + 20, sans(14, true), ACCENT);
+    draw(fmtCurrency(conv(bill.grand_total), currency), W - P, y + 20, sans(14, true), ACCENT, 'right');
     y += 26;
     thickLine(y); y += 2 + 16;
 
-    if (currency !== 'USD') {
+    if (converting) {
+      draw(`Converted to USD · 1 ${bill.currency} = ${fmtCurrency(exchangeRate, 'USD')}`, W / 2, y + 12, sans(10, false), MUTED, 'center');
+      y += 16;
+    } else if (currency !== 'USD') {
       draw(`All amounts in ${currency}`, W / 2, y + 12, sans(10, false), MUTED, 'center');
       y += 16;
     }
