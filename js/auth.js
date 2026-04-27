@@ -51,7 +51,9 @@ const Auth = (() => {
   }
 
   function normalizePhone(phone) {
-    return phone.replace(/\D/g, '');
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length === 11 && digits[0] === '1') return digits.slice(1);
+    return digits;
   }
 
   function formatPhone(phone) {
