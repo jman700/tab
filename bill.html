@@ -139,7 +139,47 @@
     await ensureJoined();
     render();
     setupCurrencyToggle();
+    setupItemEdit();
     subscribeRealtime();
+  }
+
+  function setupItemEdit() {
+    $('items-list').addEventListener('click', e => {
+      const el = e.target.closest('[data-editable]');
+      if (!el || !isOwner || bill.status === 'closed') return;
+
+      const field  = el.dataset.editable;
+      const itemId = el.dataset.itemId;
+      const item   = items.find(i => i.id === itemId);
+      if (!item) return;
+
+      const input = document.createElement('input');
+      input.type        = 'text';
+      input.className   = field === 'name' ? 'item-edit-input item-edit-name' : 'item-edit-input item-edit-note';
+      input.value       = field === 'name' ? item.name : (item.note || '');
+      input.placeholder = field === 'name' ? 'Item name' : 'Note (optional)';
+      el.replaceWith(input);
+      input.focus();
+      input.select();
+
+      let committed = false;
+      async function commit() {
+        if (committed) return;
+        committed = true;
+        const newVal   = input.value.trim();
+        const saveVal  = newVal || (field === 'name' ? 'Unnamed Item' : null);
+        item[field]    = saveVal;
+        renderItems();
+        const { error } = await db.from('items').update({ [field]: saveVal }).eq('id', itemId);
+        if (error) showToast('Could not save — try again', 'error');
+      }
+
+      input.addEventListener('blur', commit);
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+        if (e.key === 'Escape') { committed = true; renderItems(); }
+      });
+    });
   }
 
   function setupCurrencyToggle() {
@@ -331,12 +371,22 @@
       }).join('');
 
       const hasMine = myItemShare > 0;
+      const canEdit = isOwner && bill.status !== 'closed';
+      const nameHtml = canEdit
+        ? `<div class="item-claim-name item-editable" data-editable="name" data-item-id="${item.id}">${escHtml(item.name)}</div>`
+        : `<div class="item-claim-name">${escHtml(item.name)}</div>`;
+      const noteHtml = canEdit
+        ? (item.note
+            ? `<div class="item-claim-note item-editable" data-editable="note" data-item-id="${item.id}">${escHtml(item.note)}</div>`
+            : `<div class="item-add-note" data-editable="note" data-item-id="${item.id}">+ Add note</div>`)
+        : (item.note ? `<div class="item-claim-note">${escHtml(item.note)}</div>` : '');
+
       return `
         <div class="item-claim-row ${hasMine ? 'has-mine' : ''}" id="item-${item.id}">
           <div class="item-claim-top">
             <div>
-              <div class="item-claim-name">${escHtml(item.name)}</div>
-              ${item.note ? `<div class="item-claim-note">${escHtml(item.note)}</div>` : ''}
+              ${nameHtml}
+              ${noteHtml}
             </div>
             <div class="item-claim-price">
               ${display(item.price)} <span>/ each</span>
