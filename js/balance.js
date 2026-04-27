@@ -80,5 +80,43 @@ const Balance = (() => {
     return Object.fromEntries(entries.filter(([, r]) => r !== null));
   }
 
-  return { computeRaw, toUSD, fetchRates };
+  // Compute minimum transfers to settle all debts.
+  // Input: output of toUSD() — [{ phone, display_name, usdNet, ... }]
+  // Output: [{ from: phone, fromName, to: phone, toName, amount }]
+  function simplify(members) {
+    // Work with cents to avoid floating-point drift
+    const balances = members.map(m => ({
+      phone: m.phone,
+      name:  m.display_name,
+      cents: Math.round(m.usdNet * 100),
+    }));
+
+    const transfers = [];
+
+    // Keep iterating until all balances are zero (within 1 cent)
+    let maxIter = balances.length * balances.length + 10; // safety cap
+    while (maxIter-- > 0) {
+      balances.sort((a, b) => a.cents - b.cents);
+      const debtor   = balances[0];                    // most negative
+      const creditor = balances[balances.length - 1];  // most positive
+
+      if (Math.abs(debtor.cents) < 1 || Math.abs(creditor.cents) < 1) break;
+
+      const amount = Math.min(-debtor.cents, creditor.cents);
+      transfers.push({
+        from:     debtor.phone,
+        fromName: debtor.name,
+        to:       creditor.phone,
+        toName:   creditor.name,
+        amount:   amount / 100,
+      });
+
+      debtor.cents   += amount;
+      creditor.cents -= amount;
+    }
+
+    return transfers;
+  }
+
+  return { computeRaw, toUSD, fetchRates, simplify };
 })();
