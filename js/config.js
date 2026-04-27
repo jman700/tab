@@ -4,8 +4,8 @@
 // Found in: Supabase Dashboard → Project Settings → API
 // ============================================================
 
-const SUPABASE_URL      = 'YOUR_SUPABASE_URL';
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+const SUPABASE_URL      = 'https://fcscdimjhycxgstnzucd.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_JpT70OJx7BA2oiJaJf-6iQ_aCuyqG4w';
 
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   db: { schema: 'tab' },
