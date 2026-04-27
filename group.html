@@ -128,8 +128,12 @@
     if (!groupId) { navigateTo('/dashboard.html'); return; }
 
     if (inviteToken) {
-      const { error } = await Groups.joinGroup(groupId, inviteToken, user.phone, user.name);
-      if (error) showToast('Invalid invite link', 'error');
+      const { error, alreadyMember } = await Groups.joinGroup(groupId, inviteToken, user.phone, user.name);
+      if (error && !alreadyMember) {
+        showToast('Invalid invite link', 'error');
+        navigateTo('/dashboard.html');
+        return;
+      }
       window.history.replaceState({}, '', `/group.html?id=${groupId}`);
     }
 
@@ -137,26 +141,32 @@
   }
 
   async function loadGroup() {
-    const [{ data: g, error: e1 }, { data: m, error: e2 }] = await Promise.all([
-      Groups.getGroup(groupId),
-      Groups.getMembers(groupId),
-    ]);
+    try {
+      const [{ data: g, error: e1 }, { data: m, error: e2 }] = await Promise.all([
+        Groups.getGroup(groupId),
+        Groups.getMembers(groupId),
+      ]);
 
-    if (e1 || !g) {
-      showToast('Group not found', 'error');
+      if (e1 || !g) {
+        showToast('Group not found', 'error');
+        navigateTo('/dashboard.html');
+        return;
+      }
+
+      group   = g;
+      members = m || [];
+
+      document.title = `Tab — ${g.name}`;
+      setText('group-name', g.name);
+      setText('group-meta', `${members.length} member${members.length !== 1 ? 's' : ''}`);
+
+      renderMembers();
+      await loadExpenses();
+    } catch (err) {
+      console.error('loadGroup failed:', err);
+      showToast('Could not load group', 'error');
       navigateTo('/dashboard.html');
-      return;
     }
-
-    group   = g;
-    members = m || [];
-
-    document.title = `Tab — ${g.name}`;
-    setText('group-name', g.name);
-    setText('group-meta', `${members.length} member${members.length !== 1 ? 's' : ''}`);
-
-    renderMembers();
-    await loadExpenses();
   }
 
   // ── Tab navigation ────────────────────────────────────────
