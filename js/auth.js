@@ -52,6 +52,7 @@ const Auth = (() => {
 
   function normalizePhone(phone) {
     const digits = phone.replace(/\D/g, '');
+    // Strip US country code (+1) inserted by iOS autocomplete.
     if (digits.length === 11 && digits[0] === '1') return digits.slice(1);
     return digits;
   }
@@ -59,7 +60,6 @@ const Auth = (() => {
   function formatPhone(phone) {
     const d = normalizePhone(phone);
     if (d.length === 10) return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
-    if (d.length === 11 && d[0] === '1') return `+1 (${d.slice(1,4)}) ${d.slice(4,7)}-${d.slice(7)}`;
     return phone;
   }
 
