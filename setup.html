@@ -49,11 +49,12 @@
     </label>
     <input type="file" id="receipt-input" accept="image/*"
            style="position:absolute;opacity:0;width:1px;height:1px;" />
+    <img id="receipt-preview" class="upload-preview hidden" alt="Receipt" />
+    <button class="btn btn-primary btn-full mt-8 hidden" id="scan-btn">Scan Receipt →</button>
     <div class="processing hidden" id="processing-state">
       <div class="spinner"></div>
       Scanning receipt with AI…
     </div>
-    <img id="receipt-preview" class="upload-preview hidden" alt="Receipt" />
   </div>
 
   <!-- Step 3: Items -->
@@ -206,13 +207,15 @@
     uploadArea.addEventListener('drop', e => {
       e.preventDefault();
       uploadArea.classList.remove('drag-over');
-      handleFile(e.dataTransfer.files[0]);
+      selectFile(e.dataTransfer.files[0]);
     });
     fileInput.addEventListener('change', e => {
       const file = e.target.files && e.target.files[0];
-      e.target.value = ''; // reset so same file can be re-selected after an error
-      if (file) handleFile(file);
+      e.target.value = '';
+      if (file) selectFile(file);
     });
+
+    $('scan-btn').addEventListener('click', scanReceipt);
 
     $('add-item-btn').addEventListener('click', addBlankItem);
 
@@ -257,30 +260,39 @@
   }
 
   // ── File handling + OCR ───────────────────────────────────
-  async function handleFile(file) {
+  let selectedFile = null;
+
+  function selectFile(file) {
     if (!file) return;
-    // Some mobile browsers return empty MIME type for HEIC/gallery picks — allow those through
     if (file.type && !file.type.startsWith('image/')) {
       showToast('Please upload an image file', 'error');
       return;
     }
 
+    selectedFile = file;
     const preview = $('receipt-preview');
     preview.src = URL.createObjectURL(file);
     show(preview);
-    show($('processing-state'));
+    show($('scan-btn'));
     hide($('upload-area'));
+  }
+
+  async function scanReceipt() {
+    if (!selectedFile) return;
+
+    const scanBtn = $('scan-btn');
+    hide(scanBtn);
+    show($('processing-state'));
 
     try {
       let base64, mediaType;
       try {
-        base64    = await compressImage(file);
+        base64    = await compressImage(selectedFile);
         mediaType = 'image/jpeg';
       } catch (compressErr) {
-        // Canvas can't decode HEIC on some browsers — send raw
         console.warn('Compression failed, sending raw:', compressErr);
-        base64    = await fileToBase64(file);
-        mediaType = file.type || 'image/jpeg';
+        base64    = await fileToBase64(selectedFile);
+        mediaType = selectedFile.type || 'image/jpeg';
       }
 
       const res = await fetch('/api/parse-receipt', {
@@ -324,8 +336,7 @@
 
     } catch (err) {
       console.error('Receipt scan failed:', err);
-      hide(preview);
-      show($('upload-area'));
+      show(scanBtn);
       showToast(`Scan failed: ${err.message || 'unknown error'} — add items manually`, 'error');
       showPostUploadSections();
     } finally {
