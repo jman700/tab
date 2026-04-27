@@ -242,22 +242,29 @@
   async function loadBalances() {
     setHTML('balances-list', '<p style="font-size:14px;color:var(--text-muted);">Computing balances…</p>');
     try {
-      const [{ data: expenses, error: e1 }, { data: bills, error: e2 }] = await Promise.all([
+      const [
+        { data: expenses,    error: e1 },
+        { data: bills,       error: e2 },
+        { data: settlements, error: e3 },
+      ] = await Promise.all([
         Groups.getExpenses(groupId),
         Groups.getBillsForGroup(groupId),
+        Groups.getSettlements(groupId),
       ]);
 
-      if (e1 || e2) {
+      if (e1 || e2 || e3) {
         setHTML('balances-list', '<p style="font-size:14px;color:var(--text-muted);">Could not load balances.</p>');
         return;
       }
 
-      const allExpenses = expenses || [];
-      const allBills    = bills    || [];
+      const allExpenses    = expenses    || [];
+      const allBills       = bills       || [];
+      const allSettlements = settlements || [];
 
       const currencies = [
         ...allExpenses.map(e => e.currency),
         ...allBills.map(b => b.currency),
+        ...allSettlements.map(s => s.currency),
       ];
 
       const memberPhones = new Set(members.map(m => m.phone));
@@ -268,8 +275,10 @@
       });
 
       const rates    = await Balance.fetchRates(currencies);
-      const rawNet   = Balance.computeRaw(allExpenses, adjustedBills, members);
+      const rawNet   = Balance.computeRaw(allExpenses, adjustedBills, members, allSettlements);
       const byMember = Balance.toUSD(rawNet, members, rates);
+
+      window._lastBalances = byMember;
 
       renderBalances(byMember);
       balancesLoaded = true;

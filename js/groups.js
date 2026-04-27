@@ -181,6 +181,27 @@ const Groups = (() => {
     };
   }
 
+  async function addSettlement(groupId, settlement) {
+    // settlement: { paid_by, paid_to, amount, currency, method, note }
+    const { data, error } = await db
+      .from('settlements')
+      .insert({ group_id: groupId, ...settlement })
+      .select()
+      .single();
+    if (error) return { error };
+    return { data };
+  }
+
+  async function getSettlements(groupId) {
+    const { data, error } = await db
+      .from('settlements')
+      .select('*')
+      .eq('group_id', groupId)
+      .order('settled_at', { ascending: false });
+    if (error) return { error };
+    return { data: data || [] };
+  }
+
   return {
     createGroup,
     getMyGroups,
@@ -191,5 +212,7 @@ const Groups = (() => {
     getExpenses,
     deleteExpense,
     getBillsForGroup,
+    addSettlement,
+    getSettlements,
   };
 })();

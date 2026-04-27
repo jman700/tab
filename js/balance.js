@@ -8,11 +8,12 @@ const Balance = (() => {
 
   // Build a map: { phone → { currency → netAmount } }
   // Positive = others owe this person. Negative = this person owes others.
-  function computeRaw(expenses, bills, members) {
+  function computeRaw(expenses, bills, members, settlements) {
     // expenses: array of expense objects with .splits[] (from Groups.getExpenses)
     // bills: array of bill objects with .grand_total, .paid_by_phone, .currency,
     //        and .memberShares: [{ phone, amount }] (caller must compute these)
     // members: array of { phone, display_name }
+    // settlements: array of { paid_by, paid_to, amount, currency }
 
     const net = {};
     members.forEach(m => { net[m.phone] = {}; });
@@ -39,6 +40,12 @@ const Balance = (() => {
       for (const share of (bill.memberShares || [])) {
         addNet(share.phone, bill.currency, -share.amount);
       }
+    }
+
+    // Settlements: sender reduces their debt, receiver reduces what they're owed
+    for (const s of (settlements || [])) {
+      addNet(s.paid_by, s.currency,  s.amount);
+      addNet(s.paid_to, s.currency, -s.amount);
     }
 
     return net;
