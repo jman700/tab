@@ -70,7 +70,10 @@
   <!-- Members tab -->
   <div id="members-tab" style="display:none;">
     <div id="members-list"></div>
-    <button class="btn btn-secondary btn-full mt-16" id="invite-members-btn">Invite Someone</button>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn btn-secondary" style="flex:1;" id="add-member-btn">+ Add Member</button>
+      <button class="btn btn-secondary" style="flex:1;" id="invite-members-btn">Invite Link</button>
+    </div>
   </div>
 
 </main>
@@ -155,6 +158,25 @@
   <button class="btn btn-primary btn-full mt-16" id="record-settle-btn">Mark as Settled</button>
 </div>
 
+<!-- Add Member Sheet -->
+<div class="sheet-backdrop" id="add-member-backdrop" style="display:none;"></div>
+<div class="sheet" id="add-member-sheet" style="display:none;">
+  <div class="sheet-handle"></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <h2 style="margin:0;">Add Member</h2>
+    <button class="btn btn-ghost btn-sm" id="close-add-member-btn">✕</button>
+  </div>
+  <div class="field">
+    <label for="member-name-input">Name</label>
+    <input class="input" id="member-name-input" type="text" placeholder="Full name" autocomplete="off" />
+  </div>
+  <div class="field">
+    <label for="member-phone-input">Phone</label>
+    <input class="input" id="member-phone-input" type="tel" placeholder="(555) 555-5555" autocomplete="tel" />
+  </div>
+  <button class="btn btn-primary btn-full mt-16" id="save-member-btn">Add to Group</button>
+</div>
+
 <!-- Settings Sheet -->
 <div class="sheet-backdrop" id="settings-backdrop" style="display:none;"></div>
 <div class="sheet" id="settings-sheet" style="display:none;">
@@ -212,8 +234,10 @@
       ]);
 
       if (e1 || !g) {
-        showToast('Group not found', 'error');
-        navigateTo('/dashboard.html');
+        const msg = e1?.message || e1?.code || 'no data returned';
+        console.error('loadGroup: getGroup failed —', msg, e1);
+        setHTML('group-name', 'Could not load group');
+        setText('group-meta', msg);
         return;
       }
 
@@ -239,9 +263,9 @@
       renderMembers();
       await loadExpenses();
     } catch (err) {
-      console.error('loadGroup failed:', err);
-      showToast('Could not load group', 'error');
-      navigateTo('/dashboard.html');
+      console.error('loadGroup threw:', err);
+      setHTML('group-name', 'Error loading group');
+      setText('group-meta', err.message || String(err));
     }
   }
 
@@ -800,6 +824,46 @@
       btn.disabled    = false;
       btn.textContent = 'Mark as Settled';
     }
+  });
+
+  // ── Add Member Sheet ──────────────────────────────────────
+  $('add-member-btn').addEventListener('click', () => {
+    $('member-name-input').value  = '';
+    $('member-phone-input').value = '';
+    openSheet('add-member-backdrop', 'add-member-sheet');
+    setTimeout(() => $('member-name-input').focus(), 320);
+  });
+  $('close-add-member-btn').addEventListener('click', () => closeSheet('add-member-backdrop', 'add-member-sheet'));
+  $('add-member-backdrop').addEventListener('click',  () => closeSheet('add-member-backdrop', 'add-member-sheet'));
+
+  $('save-member-btn').addEventListener('click', async () => {
+    const name  = $('member-name-input').value.trim();
+    const raw   = $('member-phone-input').value.trim();
+    if (!name)  { showToast('Enter a name', 'error'); return; }
+    if (!raw)   { showToast('Enter a phone number', 'error'); return; }
+    const phone = Auth.normalizePhone(raw);
+    if (!phone) { showToast('Invalid phone number', 'error'); return; }
+
+    const btn = $('save-member-btn');
+    btn.disabled = true;
+    btn.textContent = 'Adding…';
+    try {
+      const { error } = await Groups.addMember(groupId, phone, name);
+      if (error) { showToast('Could not add member', 'error'); return; }
+      closeSheet('add-member-backdrop', 'add-member-sheet');
+      showToast(`${name} added`, 'success');
+      const { data: m } = await Groups.getMembers(groupId);
+      members = m || [];
+      setText('group-meta', `${members.length} member${members.length !== 1 ? 's' : ''}`);
+      renderMembers();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Add to Group';
+    }
+  });
+
+  $('member-phone-input').addEventListener('input', e => {
+    e.target.value = formatPhone(e.target.value);
   });
 
   // ── Settings Sheet ────────────────────────────────────────

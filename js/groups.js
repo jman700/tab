@@ -39,14 +39,16 @@ const Groups = (() => {
   }
 
   async function getGroup(id) {
-    const { data, error } = await db
-      .from('group_members')
-      .select('groups(*)')
-      .eq('group_id', id)
-      .limit(1)
-      .maybeSingle();
-    if (error) return { error };
-    return { data: data?.groups || null };
+    // Try both access patterns; whichever succeeds first wins.
+    const [directRes, joinRes] = await Promise.all([
+      db.from('groups').select('*').eq('id', id).limit(1),
+      db.from('group_members').select('groups(*)').eq('group_id', id).limit(1),
+    ]);
+    if (!directRes.error && directRes.data?.[0]) return { data: directRes.data[0] };
+    if (!joinRes.error && joinRes.data?.[0]?.groups) return { data: joinRes.data[0].groups };
+    const err = directRes.error || joinRes.error;
+    console.error('getGroup failed — direct:', directRes.error, '| join:', joinRes.error, '| data:', directRes.data, joinRes.data);
+    return { error: err || new Error('Group not found') };
   }
 
   async function getMembers(groupId) {
@@ -203,6 +205,16 @@ const Groups = (() => {
     return { data: data || [] };
   }
 
+  async function addMember(groupId, phone, displayName) {
+    const { data, error } = await db
+      .from('group_members')
+      .upsert({ group_id: groupId, phone, display_name: displayName }, { onConflict: 'group_id,phone', ignoreDuplicates: true })
+      .select()
+      .maybeSingle();
+    if (error) return { error };
+    return { data };
+  }
+
   async function closeGroup(groupId, reopen = false) {
     const { error } = await db
       .from('groups')
@@ -252,6 +264,7 @@ const Groups = (() => {
     getBillsForGroup,
     addSettlement,
     getSettlements,
+    addMember,
     closeGroup,
     deleteGroup,
   };
