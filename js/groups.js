@@ -176,7 +176,7 @@ const Groups = (() => {
           phone:  g.phone,
           amount: getPersonShare(g.phone, claims, items, guests, bill),
         }));
-        return { ...bill, memberShares };
+        return { ...bill, paid_by_phone: bill.paid_by_phone || bill.created_by_phone, memberShares };
       }),
     };
   }
