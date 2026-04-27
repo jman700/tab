@@ -399,6 +399,25 @@
 
   loadGroups();
 
+  // ── Tab switching ─────────────────────────────────────────
+  function switchDashTab(tab) {
+    $('tab-bills').style.display  = tab === 'bills'  ? '' : 'none';
+    $('tab-groups').style.display = tab === 'groups' ? '' : 'none';
+    $$('.dash-tab').forEach(btn =>
+      btn.classList.toggle('active', btn.dataset.tab === tab)
+    );
+    history.replaceState(null, '', '#' + tab);
+  }
+
+  $$('.dash-tab').forEach(btn =>
+    btn.addEventListener('click', () => switchDashTab(btn.dataset.tab))
+  );
+
+  // Restore tab from URL hash on load
+  const initialTab = ['bills', 'groups'].includes(location.hash.slice(1))
+    ? location.hash.slice(1) : 'bills';
+  switchDashTab(initialTab);
+
   (async () => {
     const { data } = await db.from('users').select('is_admin').eq('phone', user.phone).single();
     if (data?.is_admin) show($('admin-link'));
