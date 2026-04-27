@@ -130,6 +130,7 @@
   let group   = null;
   let members = [];
   let activeSplitMethod = 'equal';
+  let balancesLoaded = false;
 
   // ── Init ──────────────────────────────────────────────────
   async function init() {
@@ -193,7 +194,7 @@
     $('tab-expenses').classList.toggle('active', tab === 'expenses');
     $('tab-balances').classList.toggle('active', tab === 'balances');
     $('tab-members').classList.toggle('active', tab === 'members');
-    if (tab === 'balances') loadBalances();
+    if (tab === 'balances' && !balancesLoaded) loadBalances();
   }
 
   // ── Members tab ───────────────────────────────────────────
@@ -259,11 +260,19 @@
         ...allBills.map(b => b.currency),
       ];
 
+      const memberPhones = new Set(members.map(m => m.phone));
+      const adjustedBills = allBills.map(bill => {
+        const filteredShares = (bill.memberShares || []).filter(s => memberPhones.has(s.phone));
+        const groupTotal     = filteredShares.reduce((s, x) => s + x.amount, 0);
+        return { ...bill, grand_total: groupTotal, memberShares: filteredShares };
+      });
+
       const rates    = await Balance.fetchRates(currencies);
-      const rawNet   = Balance.computeRaw(allExpenses, allBills, members);
+      const rawNet   = Balance.computeRaw(allExpenses, adjustedBills, members);
       const byMember = Balance.toUSD(rawNet, members, rates);
 
       renderBalances(byMember);
+      balancesLoaded = true;
     } catch (err) {
       console.error('loadBalances failed:', err);
       setHTML('balances-list', '<p style="font-size:14px;color:var(--text-muted);">Could not load balances.</p>');
@@ -570,6 +579,7 @@
 
       closeSheet('expense-backdrop', 'expense-sheet');
       showToast('Expense added', 'success');
+      balancesLoaded = false;
       await loadExpenses();
     } finally {
       btn.disabled    = false;
