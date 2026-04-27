@@ -754,6 +754,57 @@ h3 { font-size: 18px; }
 .dash-head h1 { line-height: 1.1; }
 .dash-head p  { font-size: 14px; color: var(--text-muted); margin-top: 4px; }
 
+/* ── Dashboard tab bar ───────────────────────────────────── */
+.dash-tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+
+.dash-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 10px 20px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.dash-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ── User search dropdown ────────────────────────────────── */
+.user-search-dropdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 2px);
+  z-index: 200;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  overflow: hidden;
+}
+
+.user-search-item {
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+
+.user-search-item:last-child  { border-bottom: none; }
+.user-search-item:hover       { background: var(--surface-2); }
+
+.user-search-name  { font-size: 14px; font-weight: 500; color: var(--text); }
+.user-search-phone { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+
 /* ── Owner Banner ─────────────────────────────────────────── */
 .owner-banner {
   background: var(--accent-light);
