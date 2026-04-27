@@ -112,7 +112,13 @@
       ]);
     } catch { /* non-critical */ }
 
-    window.location.replace('/dashboard.html');
+    const returnUrl = sessionStorage.getItem('tab_return_url');
+    if (returnUrl) {
+      sessionStorage.removeItem('tab_return_url');
+      window.location.replace(returnUrl);
+    } else {
+      window.location.replace('/dashboard.html');
+    }
   }
 </script>
 </body>
