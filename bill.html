@@ -915,15 +915,24 @@
   $('summary-backdrop').addEventListener('click',  () => closeSheet('summary-backdrop', 'summary-sheet'));
 
   function renderSummary() {
-    setText('summary-meta', `${bill.name} · ${display(bill.grand_total)} total`);
+    const metaTotal = (billCurrency !== 'USD' && exchangeRate)
+      ? fmtCurrency(bill.grand_total * exchangeRate, 'USD')
+      : display(bill.grand_total);
+    setText('summary-meta', `${bill.name} · ${metaTotal} total`);
 
     const subtotal    = items.reduce((s, i) => s + i.price * i.quantity, 0);
 
+    const showDual = billCurrency !== 'USD' && !!exchangeRate;
+
     const summaryList = guests.map((g, i) => {
-      const share = getPersonShare(g.phone, claims, items, guests, bill);
-      const color = getPersonColor(i);
-      const pct   = bill.grand_total > 0 ? (share / bill.grand_total * 100) : 0;
-      const isMe  = g.phone === user.phone;
+      const share     = getPersonShare(g.phone, claims, items, guests, bill);
+      const color     = getPersonColor(i);
+      const pct       = bill.grand_total > 0 ? (share / bill.grand_total * 100) : 0;
+      const isMe      = g.phone === user.phone;
+      const usdAmt    = showDual ? fmtCurrency(share * exchangeRate, 'USD') : display(share);
+      const localLine = showDual
+        ? `<div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${fmtCurrency(share, billCurrency)}</div>`
+        : '';
       return `
         <div class="summary-row">
           <div class="summary-avatar" style="background:${color}22;color:${color};border:2px solid ${color}44;">
@@ -936,7 +945,10 @@
               <div class="summary-bar-fill" style="width:${pct}%;background:${color};"></div>
             </div>
           </div>
-          <div class="summary-amount" style="color:${color};">${display(share)}</div>
+          <div class="summary-amount" style="color:${color};">
+            ${usdAmt}
+            ${localLine}
+          </div>
         </div>
       `;
     }).join('');
@@ -944,13 +956,21 @@
     setHTML('summary-list', summaryList);
 
     const tip = subtotal * (bill.tip_percentage / 100);
+
+    function dualAmt(amount) {
+      if (!showDual) return display(amount);
+      const local = fmtCurrency(amount, billCurrency);
+      const usd   = fmtCurrency(amount * exchangeRate, 'USD');
+      return `${usd} <span style="font-size:10px;color:var(--text-muted);">(${local})</span>`;
+    }
+
     setHTML('summary-totals', `
-      <div class="summary-total-row"><span class="key">Subtotal</span><span>${display(subtotal)}</span></div>
-      <div class="summary-total-row"><span class="key">Tax</span><span>${display(bill.tax_amount)}</span></div>
-      <div class="summary-total-row"><span class="key">Tip (${bill.tip_percentage}%)</span><span>${display(tip)}</span></div>
+      <div class="summary-total-row"><span class="key">Subtotal</span><span>${dualAmt(subtotal)}</span></div>
+      <div class="summary-total-row"><span class="key">Tax</span><span>${dualAmt(bill.tax_amount)}</span></div>
+      <div class="summary-total-row"><span class="key">Tip (${bill.tip_percentage}%)</span><span>${dualAmt(tip)}</span></div>
       <div class="summary-final">
         <span class="key">Total</span>
-        <span class="val">${display(bill.grand_total)}</span>
+        <span class="val">${dualAmt(bill.grand_total)}</span>
       </div>
     `);
 
