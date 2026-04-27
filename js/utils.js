@@ -61,9 +61,11 @@ async function getExchangeRate(from, to) {
 // ── Amount formatting ────────────────────────────────────────
 function fmt(n, currency = '') {
   const abs = Math.abs(n || 0);
-  const s = abs % 1 === 0
-    ? Math.round(abs).toLocaleString()
-    : abs.toFixed(2).replace(/\.?0+$/, '');
+  const hasCents = abs % 1 !== 0;
+  const s = abs.toLocaleString('en-US', {
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: 2,
+  });
   return currency ? `${currency}${s}` : `$${s}`;
 }
 

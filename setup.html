@@ -107,9 +107,12 @@
       <button class="tip-btn" data-val="0">No tip</button>
       <button class="tip-btn" data-val="custom">Custom</button>
     </div>
-    <div class="tip-custom hidden" id="tip-custom-row">
-      <input class="input" id="tip-custom-input" type="number" min="0" max="100" step="1" placeholder="%" style="max-width:80px;text-align:center;" />
-      <span style="font-size:14px;color:var(--text-2);">%</span>
+    <div class="tip-custom hidden" id="tip-custom-row" style="gap:10px;">
+      <div class="toggle-group" style="flex-shrink:0;">
+        <button class="toggle-btn active" id="tip-type-pct">%</button>
+        <button class="toggle-btn" id="tip-type-fixed">$</button>
+      </div>
+      <input class="input" id="tip-custom-input" type="number" min="0" max="100" step="1" placeholder="%" style="max-width:90px;text-align:center;" />
     </div>
     <div style="margin-top:14px;">
       <label class="label mb-8" style="display:block;">Split tip</label>
@@ -134,7 +137,7 @@
       <span id="t-tax">—</span>
     </div>
     <div class="total-row">
-      <span class="label">Tip (<span id="t-tip-pct">0</span>%)</span>
+      <span class="label">Tip (<span id="t-tip-label">0%</span>)</span>
       <span id="t-tip">—</span>
     </div>
     <div class="total-row total-final">
@@ -158,14 +161,16 @@
   if (!user) throw new Error('Not authenticated');
 
   // ── State ────────────────────────────────────────────────
-  let billId       = null;
-  let items        = [];
-  let tipPct       = 20;
-  let tipSplitType = 'proportional';
-  let taxAmount    = 0;
-  let taxIncluded  = false;
-  let isEditMode   = false;
-  let currencyCode = 'USD';
+  let billId        = null;
+  let items         = [];
+  let tipPct        = 20;
+  let tipIsFixed    = false;
+  let tipFixedAmt   = 0;
+  let tipSplitType  = 'proportional';
+  let taxAmount     = 0;
+  let taxIncluded   = false;
+  let isEditMode    = false;
+  let currencyCode  = 'USD';
 
   // ── Init ─────────────────────────────────────────────────
   async function init() {
@@ -260,9 +265,39 @@
     );
 
     $('tip-custom-input').addEventListener('input', debounce(() => {
-      tipPct = toNum($('tip-custom-input').value);
+      if (tipIsFixed) {
+        tipFixedAmt = toNum($('tip-custom-input').value);
+      } else {
+        tipPct = toNum($('tip-custom-input').value);
+      }
       updateTotals();
     }, 300));
+
+    $('tip-type-pct').addEventListener('click', () => {
+      if (!tipIsFixed) return;
+      tipIsFixed = false;
+      $('tip-type-pct').classList.add('active');
+      $('tip-type-fixed').classList.remove('active');
+      const inp = $('tip-custom-input');
+      inp.placeholder = '%';
+      inp.max         = '100';
+      inp.step        = '1';
+      inp.value       = tipPct || '';
+      updateTotals();
+    });
+
+    $('tip-type-fixed').addEventListener('click', () => {
+      if (tipIsFixed) return;
+      tipIsFixed = true;
+      $('tip-type-fixed').classList.add('active');
+      $('tip-type-pct').classList.remove('active');
+      const inp = $('tip-custom-input');
+      inp.placeholder = '0.00';
+      inp.removeAttribute('max');
+      inp.step        = '0.01';
+      inp.value       = tipFixedAmt || '';
+      updateTotals();
+    });
 
     [$('split-proportional'), $('split-equal')].forEach(btn =>
       btn.addEventListener('click', () => {
@@ -444,14 +479,18 @@
   function updateTotals() {
     const subtotal = getSubtotal();
     const tax      = taxIncluded ? 0 : taxAmount;
-    const tip      = subtotal * (tipPct / 100);
+    const tip      = tipIsFixed ? tipFixedAmt : subtotal * (tipPct / 100);
     const grand    = subtotal + tax + tip;
 
-    setText('t-subtotal', fmtCurrency(subtotal, currencyCode));
-    setText('t-tax',      fmtCurrency(tax,      currencyCode));
-    setText('t-tip-pct',  tipPct);
-    setText('t-tip',      fmtCurrency(tip,      currencyCode));
-    setText('t-total',    fmtCurrency(grand,    currencyCode));
+    const tipLabel = tipIsFixed
+      ? fmtCurrency(tipFixedAmt, currencyCode) + ' fixed'
+      : `${tipPct}%`;
+
+    setText('t-subtotal',  fmtCurrency(subtotal, currencyCode));
+    setText('t-tax',       fmtCurrency(tax,      currencyCode));
+    setText('t-tip-label', tipLabel);
+    setText('t-tip',       fmtCurrency(tip,      currencyCode));
+    setText('t-total',     fmtCurrency(grand,    currencyCode));
   }
 
   function setActiveTipBtn(pct) {
@@ -481,10 +520,11 @@
     btn.textContent = 'Saving…';
 
     try {
-      const subtotal = getSubtotal();
-      const tax      = taxIncluded ? 0 : taxAmount;
-      const tip      = subtotal * (tipPct / 100);
-      const grand    = subtotal + tax + tip;
+      const subtotal       = getSubtotal();
+      const tax            = taxIncluded ? 0 : taxAmount;
+      const tip            = tipIsFixed ? tipFixedAmt : subtotal * (tipPct / 100);
+      const effectiveTipPct = subtotal > 0 ? (tip / subtotal) * 100 : tipPct;
+      const grand          = subtotal + tax + tip;
 
       if (!billId) {
         const { data: bill, error: bErr } = await db.from('bills').insert({
@@ -493,7 +533,7 @@
           created_by_name:  user.name,
           status:           'active',
           currency:         currencyCode,
-          tip_percentage:   tipPct,
+          tip_percentage:   effectiveTipPct,
           tip_split_type:   tipSplitType,
           subtotal,
           tax_amount:       taxAmount,
@@ -516,7 +556,7 @@
           name,
           status:         'active',
           currency:        currencyCode,
-          tip_percentage:  tipPct,
+          tip_percentage:  effectiveTipPct,
           tip_split_type:  tipSplitType,
           subtotal,
           tax_amount:      taxAmount,

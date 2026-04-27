@@ -235,9 +235,9 @@
         </div>
         <div class="bill-card-footer">
           <span class="bill-card-yours">
-            ${myShare > 0 ? `Your share: ${fmt(myShare)}` : '&nbsp;'}
+            ${myShare > 0 ? `Your share: ${fmtCurrency(myShare, bill.currency || 'USD')}` : '&nbsp;'}
           </span>
-          <span class="bill-card-total">${fmt(bill.grand_total)}</span>
+          <span class="bill-card-total">${fmtCurrency(bill.grand_total, bill.currency || 'USD')}</span>
         </div>
       </div>
     `;
