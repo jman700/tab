@@ -112,7 +112,8 @@ CREATE POLICY "public_all" ON tab.users FOR ALL USING (true) WITH CHECK (true);
 -- ── Migrations ───────────────────────────────────────────────
 -- Run these if you already created the tables above (new columns added later):
 ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS currency      TEXT    DEFAULT 'USD';
-ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS receipt_urls TEXT[]  DEFAULT '{}';
+ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS receipt_urls  TEXT[]  DEFAULT '{}';
+ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS paid_by_phone TEXT;
 
 -- Storage bucket setup:
 -- 1. Create a bucket named "receipts" and set it to Public (allows public reads).

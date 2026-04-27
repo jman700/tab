@@ -25,6 +25,7 @@
     <div class="header-actions">
       <span id="user-greeting" style="font-size:14px;color:var(--text-2);"></span>
       <a href="/profile.html" class="btn btn-ghost btn-sm">Profile</a>
+      <a href="/admin.html" class="btn btn-ghost btn-sm hidden" id="admin-link">Admin</a>
       <button class="btn btn-ghost btn-sm" id="logout-btn">Sign Out</button>
     </div>
   </div>
@@ -245,6 +246,11 @@
   }
 
   loadBills();
+
+  (async () => {
+    const { data } = await db.from('users').select('is_admin').eq('phone', user.phone).single();
+    if (data?.is_admin) show($('admin-link'));
+  })();
 </script>
 </body>
 </html>
