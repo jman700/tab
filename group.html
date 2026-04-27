@@ -51,12 +51,16 @@
 
   <!-- Balances tab -->
   <div id="balances-tab" style="display:none;">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+      <button class="btn btn-secondary btn-sm" id="simplify-btn">Simplify</button>
+    </div>
     <div id="balances-list">
       <div class="bill-card-skeleton">
         <div class="skeleton" style="height:18px;width:50%;margin-bottom:10px;"></div>
         <div class="skeleton" style="height:13px;width:30%;"></div>
       </div>
     </div>
+    <div id="simplified-list" style="display:none;"></div>
   </div>
 
   <!-- Members tab -->
@@ -596,7 +600,165 @@
     }
   });
 
+  // ── Simplify view ─────────────────────────────────────────
+  let showingSimplified = false;
+
+  $('simplify-btn').addEventListener('click', () => {
+    showingSimplified = !showingSimplified;
+    $('simplify-btn').textContent = showingSimplified ? 'Show All' : 'Simplify';
+    $('balances-list').style.display   = showingSimplified ? 'none' : '';
+    $('simplified-list').style.display = showingSimplified ? '' : 'none';
+
+    if (showingSimplified) {
+      const byMember = window._lastBalances || [];
+      const transfers = Balance.simplify(byMember);
+      renderSimplified(transfers);
+    }
+  });
+
+  function renderSimplified(transfers) {
+    if (transfers.length === 0) {
+      setHTML('simplified-list', `
+        <div class="empty">
+          <div class="empty-icon">✓</div>
+          <h3>All settled up</h3>
+          <p>No transfers needed.</p>
+        </div>
+      `);
+      return;
+    }
+    setHTML('simplified-list', transfers.map(t => {
+      const isYouPaying = t.from === user.phone;
+      return `
+        <div class="bill-card fade-up" style="cursor:pointer;"
+             data-from="${escHtml(t.from)}"
+             data-from-name="${escHtml(t.fromName)}"
+             data-to="${escHtml(t.to)}"
+             data-to-name="${escHtml(t.toName)}"
+             data-amount="${t.amount}"
+             onclick="openSettleSheet(this)">
+          <div class="bill-card-top">
+            <div class="bill-card-name">${escHtml(t.fromName)} pays ${escHtml(t.toName)}</div>
+            <span style="font-size:15px;font-weight:600;color:var(--accent);">${fmtCurrency(t.amount, 'USD')}</span>
+          </div>
+          ${isYouPaying ? `<div class="bill-card-meta"><span style="color:var(--accent);">Tap to settle →</span></div>` : ''}
+        </div>
+      `;
+    }).join(''));
+  }
+
+  // ── Settle-Up Sheet ───────────────────────────────────────
+  let pendingSettle = null;
+  let activeSettleMethod = 'venmo';
+
+  function openSettleSheet(card) {
+    pendingSettle = {
+      from:     card.dataset.from,
+      fromName: card.dataset.fromName,
+      to:       card.dataset.to,
+      toName:   card.dataset.toName,
+      amount:   parseFloat(card.dataset.amount),
+    };
+
+    const isYouPaying = pendingSettle.from === user.phone;
+    setText('settle-description',
+      isYouPaying
+        ? `You pay ${pendingSettle.toName} ${fmtCurrency(pendingSettle.amount, 'USD')}`
+        : `${pendingSettle.fromName} pays ${pendingSettle.toName} ${fmtCurrency(pendingSettle.amount, 'USD')}`
+    );
+
+    activeSettleMethod = 'venmo';
+    $$('[data-settle-method]').forEach(b => b.classList.toggle('active', b.dataset.settleMethod === 'venmo'));
+    renderVenmoButton();
+    $('settle-note').value = '';
+    openSheet('settle-backdrop', 'settle-sheet');
+  }
+
+  function renderVenmoButton() {
+    if (!pendingSettle || activeSettleMethod !== 'venmo') {
+      setHTML('venmo-settle-wrap', '');
+      return;
+    }
+    setHTML('venmo-settle-wrap', `
+      <a href="venmo://paycharge?txn=pay&amount=${pendingSettle.amount.toFixed(2)}&note=${encodeURIComponent('TAB: ' + pendingSettle.toName)}"
+         class="btn btn-secondary btn-full" style="display:block;text-align:center;text-decoration:none;">
+        Open Venmo — Pay ${fmtCurrency(pendingSettle.amount, 'USD')}
+      </a>
+      <p style="font-size:12px;color:var(--text-muted);text-align:center;margin-top:6px;">Search for ${escHtml(pendingSettle.toName)} in Venmo, then tap "Mark as Settled" below.</p>
+    `);
+  }
+
+  $$('[data-settle-method]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeSettleMethod = btn.dataset.settleMethod;
+      $$('[data-settle-method]').forEach(b => b.classList.toggle('active', b === btn));
+      renderVenmoButton();
+    });
+  });
+
+  $('close-settle-btn').addEventListener('click', () => closeSheet('settle-backdrop', 'settle-sheet'));
+  $('settle-backdrop').addEventListener('click', () => closeSheet('settle-backdrop', 'settle-sheet'));
+
+  $('record-settle-btn').addEventListener('click', async () => {
+    if (!pendingSettle) return;
+
+    const btn = $('record-settle-btn');
+    btn.disabled    = true;
+    btn.textContent = 'Recording…';
+
+    try {
+      const { error } = await Groups.addSettlement(groupId, {
+        paid_by:  pendingSettle.from,
+        paid_to:  pendingSettle.to,
+        amount:   pendingSettle.amount,
+        currency: 'USD',
+        method:   activeSettleMethod,
+        note:     $('settle-note').value.trim() || null,
+      });
+
+      if (error) { showToast('Could not record settlement', 'error'); return; }
+
+      closeSheet('settle-backdrop', 'settle-sheet');
+      showToast('Settlement recorded', 'success');
+      pendingSettle     = null;
+      showingSimplified = false;
+      $('simplify-btn').textContent        = 'Simplify';
+      $('balances-list').style.display     = '';
+      $('simplified-list').style.display   = 'none';
+      balancesLoaded = false;
+      await loadBalances();
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = 'Mark as Settled';
+    }
+  });
+
   init();
 </script>
+<!-- Settle-Up Sheet -->
+<div class="sheet-backdrop" id="settle-backdrop" style="display:none;"></div>
+<div class="sheet" id="settle-sheet" style="display:none;">
+  <div class="sheet-handle"></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <h2 style="margin:0;">Settle Up</h2>
+    <button class="btn btn-ghost btn-sm" id="close-settle-btn">✕</button>
+  </div>
+  <p id="settle-description" style="font-size:15px;margin-bottom:16px;"></p>
+  <div class="field">
+    <label>How did you pay?</label>
+    <div class="toggle-group" style="margin-top:6px;">
+      <button class="toggle-btn active" data-settle-method="venmo">Venmo</button>
+      <button class="toggle-btn" data-settle-method="cash">Cash</button>
+      <button class="toggle-btn" data-settle-method="other">Other</button>
+    </div>
+  </div>
+  <div id="venmo-settle-wrap" style="margin-top:12px;"></div>
+  <div class="field" style="margin-top:12px;">
+    <label for="settle-note">Note <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;">(optional)</span></label>
+    <input class="input" id="settle-note" type="text" placeholder="Optional note…" autocomplete="off" />
+  </div>
+  <button class="btn btn-primary btn-full mt-16" id="record-settle-btn">Mark as Settled</button>
+</div>
+
 </body>
 </html>
