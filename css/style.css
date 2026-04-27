@@ -414,11 +414,13 @@ h3 { font-size: 18px; }
 }
 .tip-custom .input { max-width: 80px; text-align: center; }
 .toggle-group {
-  display: inline-flex;
+  display: flex;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  overflow: hidden;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   background: var(--surface-2);
+  width: 100%;
 }
 .toggle-btn {
   padding: 8px 16px;
@@ -804,6 +806,14 @@ h3 { font-size: 18px; }
 
 .user-search-name  { font-size: 14px; font-weight: 500; color: var(--text); }
 .user-search-phone { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+
+/* ── Participant selection */
+.participant-list  { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.participant-row   { display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+.participant-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); flex-shrink: 0; cursor: pointer; }
+.participant-row .participant-name  { font-size: 14px; font-weight: 500; color: var(--text); flex: 1; }
+.participant-row .participant-phone { font-size: 12px; color: var(--text-muted); }
+.participant-row input:disabled { opacity: 0.45; cursor: default; }
 
 /* ── Owner Banner ─────────────────────────────────────────── */
 .owner-banner {
