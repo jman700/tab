@@ -672,14 +672,19 @@
   function updateExactNote() {
     const amount   = parseFloat($('exp-amount').value) || 0;
     const currency = $('exp-currency').value || 'USD';
-    const total    = $$('.split-exact-input').reduce((s, el) => s + (parseFloat(el.value) || 0), 0);
+    const total    = [...$$('.split-exact-input')].reduce((s, el) => s + (parseFloat(el.value) || 0), 0);
     const note     = $('exact-sum-note');
     if (!note) return;
-    const diff = Math.abs(total - amount);
-    note.textContent = diff < 0.01
-      ? `✓ Adds up to ${fmtCurrency(amount, currency)}`
-      : `Total: ${fmtCurrency(total, currency)} (must equal ${fmtCurrency(amount, currency)})`;
-    note.style.color = diff < 0.01 ? 'var(--green)' : 'var(--red)';
+    const diff = total - amount;
+    if (Math.abs(diff) < 0.01) {
+      note.textContent = `✓ Adds up to ${fmtCurrency(amount, currency)}`;
+      note.style.color = 'var(--green)';
+    } else {
+      const direction = diff > 0 ? 'over' : 'under';
+      const absDiff   = fmtCurrency(Math.abs(diff).toFixed(2), currency);
+      note.textContent = `Total: ${fmtCurrency(total, currency)} (must equal ${fmtCurrency(amount, currency)} — ${absDiff} ${direction})`;
+      note.style.color = 'var(--red, #e74c3c)';
+    }
   }
 
   function updateSharesAmounts() {
@@ -828,7 +833,10 @@
       const inputs     = $$('.split-exact-input');
       const totalExact = inputs.reduce((s, el) => s + (parseFloat(el.value) || 0), 0);
       if (Math.abs(totalExact - amount) > 0.01) {
-        showToast(`Amounts must sum to ${fmtCurrency(amount, currency)}`, 'error');
+        const diff      = totalExact - amount;
+        const direction = diff > 0 ? 'over' : 'under';
+        const absDiff   = fmtCurrency(Math.abs(diff).toFixed(2), currency);
+        showToast(`Amounts must equal ${fmtCurrency(amount, currency)} — ${absDiff} ${direction}`, 'error');
         return;
       }
       splits = inputs.map(el => ({
