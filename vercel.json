@@ -1,0 +1,7 @@
+{
+  "rewrites": [
+    { "source": "/bill/:id", "destination": "/bill.html" },
+    { "source": "/setup/:id", "destination": "/setup.html" },
+    { "source": "/setup",    "destination": "/setup.html" }
+  ]
+}

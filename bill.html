@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tab — Bill</title>
+  <meta name="description" content="Claim your items and see your share of the bill." />
+  <meta property="og:title"       content="Tab — Split this bill" />
+  <meta property="og:description" content="Tap what you had and see exactly what you owe." />
+  <meta property="og:type"        content="website" />
+  <meta name="theme-color"        content="#B8872A" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+<header class="header">
+  <div class="header-inner">
+    <button class="btn btn-ghost btn-sm" id="back-btn">← Dashboard</button>
+    <a href="/dashboard.html" class="brand">T<em>a</em>b</a>
+    <button class="btn btn-secondary btn-sm" id="share-btn">Share</button>
+  </div>
+</header>
+
+<div class="bill-hero" id="bill-hero">
+  <h1 id="bill-name">Loading…</h1>
+  <p id="bill-meta"></p>
+</div>
+
+<main class="container page" id="main" style="padding-top:0;">
+
+  <!-- Owner banner -->
+  <div class="owner-banner hidden" id="owner-banner">
+    ✦ You created this bill — only you can manage guests and close it.
+  </div>
+
+  <!-- Guests section -->
+  <div class="guests-section" id="guests-section">
+    <div class="guests-header">
+      <span class="label">Guests (<span id="guest-count">0</span>)</span>
+      <button class="btn btn-ghost btn-sm" id="toggle-guests-btn">Show</button>
+    </div>
+    <div id="guests-list" style="display:none;"></div>
+  </div>
+
+  <!-- Confirm banner -->
+  <div class="confirm-banner hidden" id="confirm-banner">
+    <p id="confirm-msg">Confirm your items before the bill is closed.</p>
+    <button class="btn btn-primary btn-sm" id="confirm-btn">Confirm</button>
+  </div>
+
+  <!-- Items -->
+  <div class="items-section mt-16">
+    <div class="section-head mb-12">
+      <h2 style="font-size:18px;">Items</h2>
+      <span class="text-muted" style="font-size:13px;" id="unclaimed-notice"></span>
+    </div>
+    <div id="items-list"></div>
+  </div>
+
+  <!-- Owner: close bill -->
+  <div id="owner-controls" class="hidden mt-16 mb-16">
+    <button class="btn btn-danger btn-full" id="close-bill-btn">Close Bill</button>
+  </div>
+
+  <!-- Closed bill notice -->
+  <div class="card hidden mt-16 mb-16" id="closed-notice" style="text-align:center;padding:24px;">
+    <div style="font-size:24px;margin-bottom:8px;">✓</div>
+    <h3 style="font-family:var(--font-display);font-weight:500;margin-bottom:4px;">Bill Closed</h3>
+    <p class="text-muted" style="font-size:14px;">This bill has been finalized.</p>
+  </div>
+
+</main>
+
+<!-- Sticky footer -->
+<div class="bill-footer">
+  <div class="bill-footer-inner">
+    <div>
+      <span class="footer-label">Your Total</span>
+      <span class="footer-amount" id="my-total">$0</span>
+    </div>
+    <button class="btn btn-primary" id="summary-btn">Summary</button>
+  </div>
+</div>
+
+<!-- Summary Sheet -->
+<div class="sheet-backdrop" id="summary-backdrop" style="display:none;"></div>
+<div class="sheet" id="summary-sheet" style="display:none;">
+  <div class="sheet-handle"></div>
+  <h2>Bill Summary</h2>
+  <p class="sheet-meta" id="summary-meta"></p>
+  <div id="summary-list"></div>
+  <hr class="summary-divider" />
+  <div id="summary-totals"></div>
+  <button class="btn btn-primary btn-full mt-16" id="close-summary-btn">Done</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/config.js"></script>
+<script src="/js/auth.js"></script>
+<script src="/js/utils.js"></script>
+<script>
+  const user = Auth.requireAuth();
+  if (!user) throw new Error('Not authenticated');
+
+  // ── State ────────────────────────────────────────────────
+  let bill     = null;
+  let items    = [];
+  let guests   = [];
+  let claims   = [];
+  let isOwner  = false;
+  let myGuest  = null;
+  let guestsVisible = false;
+
+  const billId = getBillIdFromUrl();
+  if (!billId) navigateTo('/dashboard.html');
+
+  // ── Init ─────────────────────────────────────────────────
+  async function init() {
+    await loadAll();
+    await ensureJoined();
+    render();
+    subscribeRealtime();
+  }
+
+  async function loadAll() {
+    const [billRes, itemsRes, guestsRes, claimsRes] = await Promise.all([
+      db.from('bills').select('*').eq('id', billId).single(),
+      db.from('items').select('*').eq('bill_id', billId).order('position'),
+      db.from('guests').select('*').eq('bill_id', billId).order('joined_at'),
+      db.from('claims').select('*').eq('bill_id', billId),
+    ]);
+
+    if (billRes.error || !billRes.data) { navigateTo('/dashboard.html'); return; }
+
+    bill   = billRes.data;
+    items  = itemsRes.data  || [];
+    guests = guestsRes.data || [];
+    claims = claimsRes.data || [];
+
+    isOwner = bill.created_by_phone === user.phone;
+    myGuest = guests.find(g => g.phone === user.phone) || null;
+
+    document.title = `Tab — ${bill.name}`;
+    setText('bill-name', bill.name);
+    setText('bill-meta', `${formatDate(bill.created_at)} · ${guests.length} guest${guests.length !== 1 ? 's' : ''}`);
+  }
+
+  // ── Auto-join as guest ────────────────────────────────────
+  async function ensureJoined() {
+    if (myGuest) {
+      const fp = Auth.getFingerprint();
+      if (myGuest.device_fingerprint !== fp) {
+        await db.from('guests').update({ device_fingerprint: fp }).eq('id', myGuest.id);
+      }
+      return;
+    }
+
+    if (bill.status === 'closed') return;
+
+    const { data: newGuest, error } = await db.from('guests').insert({
+      bill_id:            billId,
+      name:               user.name,
+      phone:              user.phone,
+      device_fingerprint: Auth.getFingerprint(),
+    }).select().single();
+
+    if (!error && newGuest) {
+      guests.push(newGuest);
+      myGuest = newGuest;
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────
+  function render() {
+    renderHeader();
+    renderGuests();
+    renderItems();
+    renderConfirmBanner();
+    renderMyTotal();
+    if (bill.status === 'closed') {
+      show($('closed-notice'));
+      hide($('owner-controls'));
+    } else if (isOwner) {
+      show($('owner-controls'));
+    }
+  }
+
+  function renderHeader() {
+    if (isOwner) show($('owner-banner'));
+    setText('guest-count', guests.length);
+    setText('bill-meta', `${formatDate(bill.created_at)} · ${guests.length} guest${guests.length !== 1 ? 's' : ''}`);
+  }
+
+  function renderGuests() {
+    const list = $('guests-list');
+    if (!guests.length) {
+      list.innerHTML = '<div style="padding:12px 16px;font-size:14px;color:var(--text-muted);">No guests yet.</div>';
+      return;
+    }
+
+    list.innerHTML = guests.map((g, i) => {
+      const color        = getPersonColor(i);
+      const isMe         = g.phone === user.phone;
+      const myShare      = getPersonShare(g.phone, claims, items, guests, bill);
+      const ownerTag     = bill.created_by_phone === g.phone
+        ? '<span class="badge badge-setup" style="font-size:10px;">Owner</span>' : '';
+      const paidBtn      = isOwner && !isMe
+        ? `<button class="paid-toggle ${g.has_paid ? 'paid' : ''}" onclick="togglePaid('${g.id}', ${!g.has_paid})">${g.has_paid ? '✓ Paid' : 'Mark Paid'}</button>` : '';
+      const removeBtn    = isOwner && !isMe
+        ? `<button class="btn-icon" title="Remove guest" onclick="removeGuest('${g.id}', '${escHtml(g.name)}')">×</button>` : '';
+      const confirmedDot = g.has_confirmed
+        ? `<span style="font-size:10px;color:var(--green);">✓ confirmed</span>` : '';
+
+      return `
+        <div class="guest-row" id="guest-${g.id}">
+          <div class="guest-avatar" style="background:${color}22;color:${color};border:1.5px solid ${color}44;">
+            ${getInitials(g.name)}
+          </div>
+          <div class="guest-info">
+            <div class="guest-name">${escHtml(g.name)}${isMe ? ' <span style="color:var(--text-muted);font-size:12px;">(you)</span>' : ''} ${ownerTag}</div>
+            <div class="guest-phone">${Auth.formatPhone(g.phone)} ${confirmedDot}</div>
+          </div>
+          <div class="guest-actions">
+            ${fmt(myShare)}
+            ${paidBtn}
+            ${removeBtn}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderItems() {
+    const list = $('items-list');
+    if (!items.length) {
+      list.innerHTML = '<div class="empty"><p>No items found.</p></div>';
+      return;
+    }
+
+    let unclaimedCount = 0;
+
+    list.innerHTML = items.map(item => {
+      let myItemShare = 0;
+
+      const chips = Array.from({ length: item.quantity }, (_, unitIdx) => {
+        const unitClaims = claims.filter(c => c.item_id === item.id && c.unit_index === unitIdx);
+        const isEmpty    = unitClaims.length === 0;
+        const isMine     = unitClaims.some(c => c.guest_phone === user.phone);
+
+        if (isEmpty) unclaimedCount++;
+        if (isMine)  myItemShare += item.price / unitClaims.length;
+
+        const avatars = unitClaims.map(c => {
+          const g     = guests.find(x => x.phone === c.guest_phone);
+          const gIdx  = guests.findIndex(x => x.phone === c.guest_phone);
+          const color = getPersonColor(gIdx >= 0 ? gIdx : 0);
+          return `<div class="chip-avatar" style="background:${color}22;color:${color};border:1.5px solid ${color};">${getInitials(g ? g.name : '?')}</div>`;
+        }).join('');
+
+        const splitLabel   = unitClaims.length > 1 ? `<span class="chip-split">÷${unitClaims.length}</span>` : '';
+        const claimedStyle = !isEmpty ? 'border-style:solid;background:var(--surface-2);' : '';
+        const canClaim     = bill.status !== 'closed';
+
+        return `
+          <button
+            class="chip ${isEmpty ? '' : 'claimed'}"
+            style="${claimedStyle}"
+            ${canClaim ? `onclick="toggleClaim('${item.id}', ${unitIdx})"` : 'disabled'}
+            title="${isEmpty ? 'Claim this item' : isMine ? 'Unclaim' : 'Join split'}"
+          >
+            ${isEmpty ? '<span style="color:var(--border-strong);font-size:20px;line-height:1;">+</span>' : avatars}
+            ${splitLabel}
+          </button>
+        `;
+      }).join('');
+
+      const hasMine = myItemShare > 0;
+      return `
+        <div class="item-claim-row ${hasMine ? 'has-mine' : ''}" id="item-${item.id}">
+          <div class="item-claim-top">
+            <div>
+              <div class="item-claim-name">${escHtml(item.name)}</div>
+              ${item.note ? `<div class="item-claim-note">${escHtml(item.note)}</div>` : ''}
+            </div>
+            <div class="item-claim-price">
+              ${fmt(item.price)} <span>/ each</span>
+            </div>
+          </div>
+          <div class="claim-chips">${chips}</div>
+          ${hasMine ? `<div class="item-my-share">Your share: ${fmt(myItemShare)}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    const notice = $('unclaimed-notice');
+    if (notice) notice.textContent = unclaimedCount > 0 ? `${unclaimedCount} unclaimed` : '';
+  }
+
+  function renderConfirmBanner() {
+    if (bill.status === 'closed' || !myGuest) return;
+    const myClaimsCount = claims.filter(c => c.guest_phone === user.phone).length;
+    if (myClaimsCount === 0) return;
+
+    const banner = $('confirm-banner');
+    show(banner);
+
+    if (myGuest.has_confirmed) {
+      banner.classList.add('confirmed');
+      setText('confirm-msg', '✓ You\'ve confirmed your items.');
+      hide($('confirm-btn'));
+    } else {
+      banner.classList.remove('confirmed');
+      setText('confirm-msg', 'Confirm your items before the bill is closed.');
+      show($('confirm-btn'));
+    }
+  }
+
+  function renderMyTotal() {
+    const total = getPersonShare(user.phone, claims, items, guests, bill);
+    const el    = $('my-total');
+    if (el) {
+      el.textContent  = fmt(total);
+      el.style.color  = total > 0 ? 'var(--accent)' : 'var(--text-muted)';
+    }
+  }
+
+  // ── Claim Toggle ──────────────────────────────────────────
+  async function toggleClaim(itemId, unitIdx) {
+    if (!myGuest)              return showToast('You must join the bill first', 'error');
+    if (bill.status === 'closed') return;
+
+    const existing = claims.find(
+      c => c.item_id === itemId && c.unit_index === unitIdx && c.guest_phone === user.phone
+    );
+
+    if (existing) {
+      // Optimistic remove
+      claims = claims.filter(c => c.id !== existing.id);
+      renderItems();
+      renderMyTotal();
+      renderConfirmBanner();
+      await db.from('claims').delete().eq('id', existing.id);
+    } else {
+      // Optimistic add
+      const tmpId    = `tmp_${Date.now()}`;
+      const newClaim = { id: tmpId, bill_id: billId, item_id: itemId, unit_index: unitIdx, guest_phone: user.phone };
+      claims.push(newClaim);
+      renderItems();
+      renderMyTotal();
+      renderConfirmBanner();
+
+      const { data: saved, error } = await db.from('claims').insert({
+        bill_id:     billId,
+        item_id:     itemId,
+        unit_index:  unitIdx,
+        guest_phone: user.phone,
+      }).select().single();
+
+      if (error) {
+        // Rollback on failure
+        claims = claims.filter(c => c.id !== tmpId);
+        renderItems();
+        renderMyTotal();
+        showToast('Could not claim item — try again', 'error');
+      } else {
+        claims = claims.map(c => c.id === tmpId ? saved : c);
+      }
+    }
+  }
+
+  // ── Confirm Items ─────────────────────────────────────────
+  $('confirm-btn').addEventListener('click', async () => {
+    if (!myGuest) return;
+    const { error } = await db.from('guests').update({ has_confirmed: true }).eq('id', myGuest.id);
+    if (error) return showToast('Could not confirm — try again', 'error');
+    myGuest          = { ...myGuest, has_confirmed: true };
+    guests           = guests.map(g => g.id === myGuest.id ? myGuest : g);
+    renderConfirmBanner();
+    renderGuests();
+    showToast('Items confirmed!', 'success');
+  });
+
+  // ── Owner: toggle paid ────────────────────────────────────
+  async function togglePaid(guestId, paid) {
+    const { error } = await db.from('guests').update({ has_paid: paid }).eq('id', guestId);
+    if (error) return showToast('Could not update — try again', 'error');
+    guests = guests.map(g => g.id === guestId ? { ...g, has_paid: paid } : g);
+    renderGuests();
+    showToast(paid ? 'Marked as paid' : 'Marked as unpaid');
+  }
+
+  // ── Owner: remove guest ───────────────────────────────────
+  async function removeGuest(guestId, name) {
+    if (!isOwner) return;
+    if (!confirm(`Remove ${name} from this bill? Their claims will be cleared.`)) return;
+
+    const g = guests.find(x => x.id === guestId);
+    if (!g) return;
+
+    claims = claims.filter(c => c.guest_phone !== g.phone);
+    guests = guests.filter(x => x.id !== guestId);
+
+    await Promise.all([
+      db.from('claims').delete().eq('bill_id', billId).eq('guest_phone', g.phone),
+      db.from('guests').delete().eq('id', guestId),
+    ]);
+
+    renderGuests();
+    renderItems();
+    renderMyTotal();
+    setText('guest-count', guests.length);
+    showToast(`${name} removed`);
+  }
+
+  // ── Owner: close bill ─────────────────────────────────────
+  $('close-bill-btn').addEventListener('click', async () => {
+    if (!isOwner) return;
+    if (!confirm('Close this bill? Claims will be locked.')) return;
+
+    const { error } = await db.from('bills').update({
+      status: 'closed', closed_at: new Date().toISOString(),
+    }).eq('id', billId);
+
+    if (error) return showToast('Could not close bill — try again', 'error');
+
+    bill = { ...bill, status: 'closed' };
+    show($('closed-notice'));
+    hide($('owner-controls'));
+    renderItems();
+    showToast('Bill closed', 'success');
+  });
+
+  // ── Share ─────────────────────────────────────────────────
+  $('share-btn').addEventListener('click', () => copyToClipboard(window.location.href));
+
+  // ── Guests toggle ─────────────────────────────────────────
+  $('toggle-guests-btn').addEventListener('click', () => {
+    guestsVisible = !guestsVisible;
+    $('guests-list').style.display = guestsVisible ? 'block' : 'none';
+    setText('toggle-guests-btn', guestsVisible ? 'Hide' : 'Show');
+  });
+
+  $('back-btn').addEventListener('click', () => navigateTo('/dashboard.html'));
+
+  // ── Summary Sheet ─────────────────────────────────────────
+  $('summary-btn').addEventListener('click', () => {
+    renderSummary();
+    openSheet('summary-backdrop', 'summary-sheet');
+  });
+  $('close-summary-btn').addEventListener('click', () => closeSheet('summary-backdrop', 'summary-sheet'));
+  $('summary-backdrop').addEventListener('click',  () => closeSheet('summary-backdrop', 'summary-sheet'));
+
+  function renderSummary() {
+    setText('summary-meta', `${bill.name} · ${fmt(bill.grand_total)} total`);
+
+    const subtotal    = items.reduce((s, i) => s + i.price * i.quantity, 0);
+
+    const summaryList = guests.map((g, i) => {
+      const share = getPersonShare(g.phone, claims, items, guests, bill);
+      const color = getPersonColor(i);
+      const pct   = bill.grand_total > 0 ? (share / bill.grand_total * 100) : 0;
+      const isMe  = g.phone === user.phone;
+      return `
+        <div class="summary-row">
+          <div class="summary-avatar" style="background:${color}22;color:${color};border:2px solid ${color}44;">
+            ${getInitials(g.name)}
+          </div>
+          <div class="summary-info">
+            <div class="summary-name">${escHtml(g.name)}${isMe ? ' <span style="color:var(--text-muted);font-weight:400;font-size:12px;">(you)</span>' : ''}</div>
+            <div class="summary-pct">${pct.toFixed(1)}% of total</div>
+            <div class="summary-bar">
+              <div class="summary-bar-fill" style="width:${pct}%;background:${color};"></div>
+            </div>
+          </div>
+          <div class="summary-amount" style="color:${color};">${fmt(share)}</div>
+        </div>
+      `;
+    }).join('');
+
+    setHTML('summary-list', summaryList);
+
+    const tip = subtotal * (bill.tip_percentage / 100);
+    setHTML('summary-totals', `
+      <div class="summary-total-row"><span class="key">Subtotal</span><span>${fmt(subtotal)}</span></div>
+      <div class="summary-total-row"><span class="key">Tax</span><span>${fmt(bill.tax_amount)}</span></div>
+      <div class="summary-total-row"><span class="key">Tip (${bill.tip_percentage}%)</span><span>${fmt(tip)}</span></div>
+      <div class="summary-final">
+        <span class="key">Total</span>
+        <span class="val">${fmt(bill.grand_total)}</span>
+      </div>
+    `);
+  }
+
+  // ── Realtime ──────────────────────────────────────────────
+  function subscribeRealtime() {
+    db.channel(`bill-${billId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'claims', filter: `bill_id=eq.${billId}` }, onClaimsChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'guests', filter: `bill_id=eq.${billId}` }, onGuestsChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bills',  filter: `id=eq.${billId}`      }, onBillChange)
+      .subscribe();
+  }
+
+  async function onClaimsChange() {
+    const { data } = await db.from('claims').select('*').eq('bill_id', billId);
+    claims = data || [];
+    renderItems();
+    renderMyTotal();
+    renderConfirmBanner();
+  }
+
+  async function onGuestsChange() {
+    const { data } = await db.from('guests').select('*').eq('bill_id', billId).order('joined_at');
+    guests  = data || [];
+    myGuest = guests.find(g => g.phone === user.phone) || null;
+    renderGuests();
+    setText('guest-count', guests.length);
+    setText('bill-meta', `${formatDate(bill.created_at)} · ${guests.length} guest${guests.length !== 1 ? 's' : ''}`);
+  }
+
+  async function onBillChange(payload) {
+    if (payload.new && payload.new.status === 'closed') {
+      bill = { ...bill, ...payload.new };
+      show($('closed-notice'));
+      hide($('owner-controls'));
+      renderItems();
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>

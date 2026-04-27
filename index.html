@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tab — Split bills beautifully</title>
+  <meta name="description" content="Split restaurant bills with friends. Upload a receipt, share a link, everyone claims what they had." />
+  <meta property="og:title"       content="Tab — Split bills beautifully" />
+  <meta property="og:description" content="Split restaurant bills with friends. Upload a receipt, share a link, everyone claims what they had." />
+  <meta property="og:type"        content="website" />
+  <meta name="theme-color"        content="#B8872A" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+<div class="auth-page">
+  <div class="auth-card fade-up">
+
+    <div class="auth-brand">
+      <div class="auth-logo">T<em>a</em>b</div>
+      <p class="auth-tagline">Split bills beautifully</p>
+    </div>
+
+    <div class="auth-form" id="login-form">
+      <div class="field">
+        <label for="name-input">Your Name</label>
+        <input
+          class="input"
+          id="name-input"
+          type="text"
+          placeholder="First name or full name"
+          autocomplete="name"
+          autofocus
+        />
+      </div>
+      <div class="field">
+        <label for="phone-input">Phone Number</label>
+        <input
+          class="input"
+          id="phone-input"
+          type="tel"
+          placeholder="(555) 555-5555"
+          autocomplete="tel"
+        />
+        <span class="text-muted" style="font-size:12px;margin-top:2px;">
+          Used to find your bills — no texts will be sent.
+        </span>
+      </div>
+      <button class="btn btn-primary btn-full btn-lg mt-4" id="login-btn">
+        Get Started
+      </button>
+    </div>
+
+    <p class="auth-footer">
+      By continuing, you agree to share your name and phone number
+      with other users of bills you join.
+    </p>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/config.js"></script>
+<script src="/js/auth.js"></script>
+<script src="/js/utils.js"></script>
+<script>
+  if (Auth.getUser()) {
+    window.location.replace('/dashboard.html');
+  }
+
+  const nameInput  = $('name-input');
+  const phoneInput = $('phone-input');
+  const loginBtn   = $('login-btn');
+
+  phoneInput.addEventListener('input', () => {
+    const digits = phoneInput.value.replace(/\D/g, '');
+    if (digits.length <= 3)       phoneInput.value = digits;
+    else if (digits.length <= 6)  phoneInput.value = `(${digits.slice(0,3)}) ${digits.slice(3)}`;
+    else if (digits.length <= 10) phoneInput.value = `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+    else                          phoneInput.value = `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6,10)}`;
+  });
+
+  loginBtn.addEventListener('click', handleLogin);
+  [nameInput, phoneInput].forEach(el =>
+    el.addEventListener('keydown', e => e.key === 'Enter' && handleLogin())
+  );
+
+  async function handleLogin() {
+    const name  = nameInput.value.trim();
+    const phone = Auth.normalizePhone(phoneInput.value);
+
+    if (!name)            return showToast('Please enter your name', 'error');
+    if (phone.length < 10) return showToast('Please enter a valid phone number', 'error');
+
+    loginBtn.disabled    = true;
+    loginBtn.textContent = 'Loading…';
+
+    const fp = Auth.getFingerprint();
+    Auth.setUser(name, phone);
+
+    try {
+      await db.from('guests')
+        .update({ device_fingerprint: fp, name })
+        .eq('phone', phone);
+    } catch { /* non-critical */ }
+
+    window.location.replace('/dashboard.html');
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tab — New Bill</title>
+  <meta name="description" content="Create a new bill to split with your group." />
+  <meta property="og:title" content="Tab — New Bill" />
+  <meta property="og:type"  content="website" />
+  <meta name="theme-color"  content="#B8872A" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+<header class="header">
+  <div class="header-inner">
+    <button class="btn btn-ghost btn-sm" id="back-btn">← Back</button>
+    <a href="/dashboard.html" class="brand">T<em>a</em>b</a>
+    <div style="width:72px;"></div>
+  </div>
+</header>
+
+<main class="container page" style="padding-top:24px;" id="main">
+  <h1 style="margin-bottom:6px;" id="page-title">New Bill</h1>
+  <p class="text-muted mb-16" style="font-size:14px;">Set up a bill to split with your group.</p>
+
+  <!-- Step 1: Bill Name -->
+  <div class="setup-section">
+    <h3><span class="step-num">1</span> Name this bill</h3>
+    <div class="field">
+      <input class="input" id="bill-name" type="text" placeholder="e.g. Dinner at Nobu, Antonio's Birthday" />
+    </div>
+  </div>
+
+  <!-- Step 2: Receipt Upload -->
+  <div class="setup-section" id="upload-section">
+    <h3><span class="step-num">2</span> Upload receipt</h3>
+    <div class="upload-area" id="upload-area">
+      <div class="upload-icon">📸</div>
+      <p>Tap to upload a receipt photo</p>
+      <span>JPG, PNG, HEIC supported</span>
+      <input type="file" id="receipt-input" accept="image/*" hidden />
+    </div>
+    <div class="processing hidden" id="processing-state">
+      <div class="spinner"></div>
+      Scanning receipt with AI…
+    </div>
+    <img id="receipt-preview" class="upload-preview hidden" alt="Receipt" />
+  </div>
+
+  <!-- Step 3: Items -->
+  <div class="setup-section hidden" id="items-section">
+    <div class="section-head" style="margin-bottom:14px;">
+      <h3 style="margin:0;"><span class="step-num">3</span> Review items</h3>
+      <button class="btn btn-secondary btn-sm" id="add-item-btn">+ Add Item</button>
+    </div>
+    <div class="items-table" id="items-table">
+      <div class="item-row header-row">
+        <span>Item</span>
+        <span>Qty</span>
+        <span>Price</span>
+        <span></span>
+      </div>
+    </div>
+    <div class="mt-8 text-muted" style="font-size:12px;">
+      Tap any field to edit. Price is per unit.
+    </div>
+  </div>
+
+  <!-- Step 4: Tax -->
+  <div class="setup-section hidden" id="tax-section">
+    <h3><span class="step-num">4</span> Tax</h3>
+    <div class="flex-between">
+      <div class="field" style="flex:1;">
+        <label for="tax-input">Tax Amount</label>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="color:var(--text-muted);font-size:16px;">$</span>
+          <input class="input" id="tax-input" type="number" min="0" step="0.01" placeholder="0.00" style="max-width:120px;" />
+        </div>
+      </div>
+      <div style="font-size:13px;color:var(--text-muted);text-align:right;line-height:1.4;" id="tax-note">
+        Auto-detected from receipt
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 5: Tip -->
+  <div class="setup-section hidden" id="tip-section">
+    <h3><span class="step-num">5</span> Tip</h3>
+    <div class="tip-presets" id="tip-presets">
+      <button class="tip-btn" data-val="15">15%</button>
+      <button class="tip-btn" data-val="18">18%</button>
+      <button class="tip-btn active" data-val="20">20%</button>
+      <button class="tip-btn" data-val="0">No tip</button>
+      <button class="tip-btn" data-val="custom">Custom</button>
+    </div>
+    <div class="tip-custom hidden" id="tip-custom-row">
+      <input class="input" id="tip-custom-input" type="number" min="0" max="100" step="1" placeholder="%" style="max-width:80px;text-align:center;" />
+      <span style="font-size:14px;color:var(--text-2);">%</span>
+    </div>
+    <div style="margin-top:14px;">
+      <label class="label mb-8" style="display:block;">Split tip</label>
+      <div class="toggle-group">
+        <button class="toggle-btn active" data-val="proportional" id="split-proportional">Proportionally</button>
+        <button class="toggle-btn" data-val="equal" id="split-equal">Equally</button>
+      </div>
+      <p class="text-muted mt-8" style="font-size:12px;" id="tip-split-desc">
+        Each person's tip is proportional to their subtotal.
+      </p>
+    </div>
+  </div>
+
+  <!-- Totals -->
+  <div class="totals-panel hidden mt-4" id="totals-panel">
+    <div class="total-row">
+      <span class="label">Subtotal</span>
+      <span id="t-subtotal">—</span>
+    </div>
+    <div class="total-row">
+      <span class="label">Tax</span>
+      <span id="t-tax">—</span>
+    </div>
+    <div class="total-row">
+      <span class="label">Tip (<span id="t-tip-pct">0</span>%)</span>
+      <span id="t-tip">—</span>
+    </div>
+    <div class="total-row total-final">
+      <span class="label">Total</span>
+      <span class="amount text-accent" id="t-total">—</span>
+    </div>
+  </div>
+
+  <!-- Publish -->
+  <button class="btn btn-primary btn-full btn-lg hidden mt-4 mb-16" id="publish-btn">
+    Share Bill →
+  </button>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/config.js"></script>
+<script src="/js/auth.js"></script>
+<script src="/js/utils.js"></script>
+<script>
+  const user = Auth.requireAuth();
+  if (!user) throw new Error('Not authenticated');
+
+  // ── State ────────────────────────────────────────────────
+  let billId       = null;
+  let items        = [];
+  let tipPct       = 20;
+  let tipSplitType = 'proportional';
+  let taxAmount    = 0;
+  let taxIncluded  = false;
+  let isEditMode   = false;
+
+  // ── Init ─────────────────────────────────────────────────
+  async function init() {
+    const pathId = getBillIdFromUrl();
+    if (pathId && pathId !== 'setup') {
+      await loadExistingBill(pathId);
+    }
+    bindEvents();
+  }
+
+  async function loadExistingBill(id) {
+    isEditMode = true;
+    billId     = id;
+    setText('page-title', 'Edit Bill');
+
+    const { data: bill, error } = await db.from('bills').select('*').eq('id', id).single();
+    if (error || !bill) { showToast('Bill not found', 'error'); return; }
+    if (bill.created_by_phone !== user.phone) { navigateTo('/dashboard.html'); return; }
+
+    $('bill-name').value = bill.name;
+    tipPct               = bill.tip_percentage || 20;
+    tipSplitType         = bill.tip_split_type || 'proportional';
+    taxAmount            = bill.tax_amount || 0;
+
+    const { data: dbItems } = await db.from('items').select('*').eq('bill_id', id).order('position');
+    items = (dbItems || []).map(i => ({ ...i, tempId: i.id }));
+
+    $('tax-input').value = taxAmount;
+    setActiveTipBtn(tipPct);
+    renderItems();
+    showPostUploadSections();
+    updateTotals();
+  }
+
+  // ── Events ───────────────────────────────────────────────
+  function bindEvents() {
+    $('back-btn').addEventListener('click', () => navigateTo('/dashboard.html'));
+
+    const uploadArea = $('upload-area');
+    const fileInput  = $('receipt-input');
+    uploadArea.addEventListener('click', () => fileInput.click());
+    uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('drag-over'); });
+    uploadArea.addEventListener('dragleave', ()  => uploadArea.classList.remove('drag-over'));
+    uploadArea.addEventListener('drop', e => {
+      e.preventDefault();
+      uploadArea.classList.remove('drag-over');
+      handleFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', e => handleFile(e.target.files[0]));
+
+    $('add-item-btn').addEventListener('click', addBlankItem);
+
+    $('tax-input').addEventListener('input', debounce(() => {
+      taxAmount = toNum($('tax-input').value);
+      updateTotals();
+    }, 300));
+
+    $$('.tip-btn').forEach(btn =>
+      btn.addEventListener('click', () => {
+        const val = btn.dataset.val;
+        $$('.tip-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        if (val === 'custom') {
+          show($('tip-custom-row'));
+          $('tip-custom-input').focus();
+        } else {
+          hide($('tip-custom-row'));
+          tipPct = toNum(val);
+          updateTotals();
+        }
+      })
+    );
+
+    $('tip-custom-input').addEventListener('input', debounce(() => {
+      tipPct = toNum($('tip-custom-input').value);
+      updateTotals();
+    }, 300));
+
+    [$('split-proportional'), $('split-equal')].forEach(btn =>
+      btn.addEventListener('click', () => {
+        [$('split-proportional'), $('split-equal')].forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        tipSplitType = btn.dataset.val;
+        $('tip-split-desc').textContent = tipSplitType === 'proportional'
+          ? "Each person's tip is proportional to their subtotal."
+          : 'Tip is split equally among all guests.';
+      })
+    );
+
+    $('publish-btn').addEventListener('click', publishBill);
+  }
+
+  // ── File handling + OCR ───────────────────────────────────
+  async function handleFile(file) {
+    if (!file || !file.type.startsWith('image/')) {
+      showToast('Please upload an image file', 'error');
+      return;
+    }
+
+    const preview = $('receipt-preview');
+    preview.src = URL.createObjectURL(file);
+    show(preview);
+    show($('processing-state'));
+    hide($('upload-area'));
+
+    try {
+      const base64 = await fileToBase64(file);
+      const res    = await fetch('/api/parse-receipt', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ image: base64, mediaType: file.type }),
+      });
+
+      if (!res.ok) throw new Error('OCR failed');
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      if (data.restaurant && !$('bill-name').value.trim()) {
+        $('bill-name').value = data.restaurant;
+      }
+
+      items = (data.items || []).map((item, i) => ({
+        tempId:   `tmp_${i}_${Date.now()}`,
+        name:     item.name     || 'Unknown Item',
+        price:    toNum(item.price),
+        quantity: toNum(item.quantity, 1),
+        note:     item.note     || '',
+        position: i,
+      }));
+
+      taxAmount   = toNum(data.tax) || 0;
+      taxIncluded = data.tax_included || false;
+      $('tax-input').value = taxAmount.toFixed(2);
+      $('tax-note').textContent = taxIncluded
+        ? 'Tax is included in item prices above.'
+        : 'Tax shown separately on receipt.';
+
+      renderItems();
+      showPostUploadSections();
+      updateTotals();
+      showToast('Receipt scanned!', 'success');
+
+    } catch (err) {
+      console.error(err);
+      showToast('Could not read receipt — add items manually', 'error');
+      show($('upload-area'));
+      showPostUploadSections();
+    } finally {
+      hide($('processing-state'));
+    }
+  }
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload  = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // ── Items ─────────────────────────────────────────────────
+  function renderItems() {
+    const table  = $('items-table');
+    const header = table.querySelector('.header-row');
+    table.innerHTML = '';
+    if (header) table.appendChild(header.cloneNode(true));
+
+    items.forEach((item, idx) => {
+      const row = document.createElement('div');
+      row.className   = 'item-row';
+      row.dataset.idx = idx;
+      row.innerHTML   = `
+        <div>
+          <input class="input item-name"  type="text"   value="${escHtml(item.name)}"         placeholder="Item name" />
+          <input class="input item-note mt-4" type="text" value="${escHtml(item.note || '')}" placeholder="Note (optional)" style="font-size:12px;" />
+        </div>
+        <input class="input item-qty"   type="number" min="1"      value="${item.quantity}"              style="text-align:center;" />
+        <input class="input item-price" type="number" min="0" step="0.01" value="${item.price.toFixed(2)}" style="text-align:right;" />
+        <button class="item-delete" data-idx="${idx}" title="Remove item">×</button>
+      `;
+      table.appendChild(row);
+
+      row.querySelector('.item-name').addEventListener('input',  e => { items[idx].name  = e.target.value; });
+      row.querySelector('.item-note').addEventListener('input',  e => { items[idx].note  = e.target.value; });
+      row.querySelector('.item-qty').addEventListener('input',   e => { items[idx].quantity = toNum(e.target.value, 1); updateTotals(); });
+      row.querySelector('.item-price').addEventListener('input', e => { items[idx].price    = toNum(e.target.value);    updateTotals(); });
+      row.querySelector('.item-delete').addEventListener('click', () => { items.splice(idx, 1); renderItems(); updateTotals(); });
+    });
+  }
+
+  function addBlankItem() {
+    items.push({ tempId: `tmp_new_${Date.now()}`, name: '', price: 0, quantity: 1, note: '', position: items.length });
+    renderItems();
+    updateTotals();
+    const rows = $$('.item-row:not(.header-row)');
+    const last = rows[rows.length - 1];
+    if (last) last.querySelector('.item-name')?.focus();
+  }
+
+  // ── Totals ─────────────────────────────────────────────────
+  function getSubtotal() {
+    return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  }
+
+  function updateTotals() {
+    const subtotal = getSubtotal();
+    const tax      = taxIncluded ? 0 : taxAmount;
+    const tip      = subtotal * (tipPct / 100);
+    const grand    = subtotal + tax + tip;
+
+    setText('t-subtotal', fmt(subtotal));
+    setText('t-tax',      fmt(tax));
+    setText('t-tip-pct',  tipPct);
+    setText('t-tip',      fmt(tip));
+    setText('t-total',    fmt(grand));
+  }
+
+  function setActiveTipBtn(pct) {
+    const standard = ['15', '18', '20', '0'];
+    if (standard.includes(String(pct))) {
+      $$('.tip-btn').forEach(b => b.classList.toggle('active', b.dataset.val === String(pct)));
+    } else {
+      $$('.tip-btn').forEach(b => b.classList.toggle('active', b.dataset.val === 'custom'));
+      show($('tip-custom-row'));
+      $('tip-custom-input').value = pct;
+    }
+  }
+
+  function showPostUploadSections() {
+    ['items-section', 'tax-section', 'tip-section', 'totals-panel', 'publish-btn']
+      .forEach(id => show($(id)));
+  }
+
+  // ── Publish ───────────────────────────────────────────────
+  async function publishBill() {
+    const name = $('bill-name').value.trim();
+    if (!name)              return showToast('Please name this bill', 'error');
+    if (items.length === 0) return showToast('Please add at least one item', 'error');
+
+    const btn = $('publish-btn');
+    btn.disabled    = true;
+    btn.textContent = 'Saving…';
+
+    try {
+      const subtotal = getSubtotal();
+      const tax      = taxIncluded ? 0 : taxAmount;
+      const tip      = subtotal * (tipPct / 100);
+      const grand    = subtotal + tax + tip;
+
+      if (!billId) {
+        const { data: bill, error: bErr } = await db.from('bills').insert({
+          name,
+          created_by_phone: user.phone,
+          created_by_name:  user.name,
+          status:           'active',
+          tip_percentage:   tipPct,
+          tip_split_type:   tipSplitType,
+          subtotal,
+          tax_amount:       taxAmount,
+          tax_included:     taxIncluded,
+          grand_total:      grand,
+        }).select().single();
+
+        if (bErr) throw bErr;
+        billId = bill.id;
+
+        await db.from('guests').insert({
+          bill_id:            billId,
+          name:               user.name,
+          phone:              user.phone,
+          device_fingerprint: Auth.getFingerprint(),
+        });
+      } else {
+        await db.from('bills').update({
+          name,
+          status:         'active',
+          tip_percentage:  tipPct,
+          tip_split_type:  tipSplitType,
+          subtotal,
+          tax_amount:      taxAmount,
+          tax_included:    taxIncluded,
+          grand_total:     grand,
+        }).eq('id', billId);
+
+        await db.from('items').delete().eq('bill_id', billId);
+      }
+
+      const itemRows = items.map((item, i) => ({
+        bill_id:  billId,
+        name:     item.name,
+        price:    item.price,
+        quantity: item.quantity,
+        note:     item.note || null,
+        position: i,
+      }));
+      const { error: iErr } = await db.from('items').insert(itemRows);
+      if (iErr) throw iErr;
+
+      navigateTo(`/bill/${billId}`);
+
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to save — please try again', 'error');
+      btn.disabled    = false;
+      btn.textContent = 'Share Bill →';
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>

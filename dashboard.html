@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tab — Your Bills</title>
+  <meta name="description" content="Your Tab bills dashboard." />
+  <meta property="og:title"  content="Tab — Your Bills" />
+  <meta property="og:type"   content="website" />
+  <meta name="theme-color"   content="#B8872A" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+<header class="header">
+  <div class="header-inner">
+    <a href="/dashboard.html" class="brand">T<em>a</em>b</a>
+    <div class="header-actions">
+      <span id="user-greeting" style="font-size:14px;color:var(--text-2);"></span>
+      <button class="btn btn-ghost btn-sm" id="logout-btn">Sign Out</button>
+    </div>
+  </div>
+</header>
+
+<main class="container dash-page page" id="main">
+
+  <div class="dash-head">
+    <div>
+      <h1>Your Bills</h1>
+      <p id="dash-subtitle" class="mt-4">&nbsp;</p>
+    </div>
+    <button class="btn btn-primary" id="new-bill-btn" style="flex-shrink:0;">
+      + New Bill
+    </button>
+  </div>
+
+  <!-- Active Bills -->
+  <div id="active-section">
+    <div class="section-divider"><h2>Active</h2></div>
+    <div id="active-bills" aria-live="polite">
+      <!-- skeleton shown while loading -->
+      <div class="bill-card-skeleton">
+        <div class="skeleton" style="height:18px;width:55%;margin-bottom:10px;"></div>
+        <div class="skeleton" style="height:13px;width:38%;margin-bottom:14px;"></div>
+        <div style="border-top:1px solid var(--border);padding-top:12px;display:flex;justify-content:space-between;">
+          <div class="skeleton" style="height:13px;width:30%;"></div>
+          <div class="skeleton" style="height:18px;width:18%;"></div>
+        </div>
+      </div>
+      <div class="bill-card-skeleton mt-8">
+        <div class="skeleton" style="height:18px;width:45%;margin-bottom:10px;"></div>
+        <div class="skeleton" style="height:13px;width:30%;margin-bottom:14px;"></div>
+        <div style="border-top:1px solid var(--border);padding-top:12px;display:flex;justify-content:space-between;">
+          <div class="skeleton" style="height:13px;width:25%;"></div>
+          <div class="skeleton" style="height:18px;width:20%;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Closed Bills (accordion) -->
+  <div id="closed-section" class="mt-24" style="display:none;">
+    <div class="section-divider">
+      <h2 class="accordion-head" id="closed-accordion-head">
+        Closed
+        <span class="accordion-chevron" id="closed-chevron">›</span>
+      </h2>
+    </div>
+    <div class="accordion-body" id="closed-bills"></div>
+  </div>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/config.js"></script>
+<script src="/js/auth.js"></script>
+<script src="/js/utils.js"></script>
+<script>
+  const user = Auth.requireAuth();
+  if (!user) throw new Error('Not authenticated');
+
+  $('user-greeting').textContent = user.name;
+
+  $('logout-btn').addEventListener('click', () => {
+    Auth.logout();
+    navigateTo('/');
+  });
+
+  $('new-bill-btn').addEventListener('click', () => navigateTo('/setup.html'));
+
+  // ── Load Bills ───────────────────────────────────────────
+  async function loadBills() {
+    try {
+      const [{ data: owned, error: e1 }, { data: guestRows, error: e2 }] = await Promise.all([
+        db.from('bills').select('*').eq('created_by_phone', user.phone).order('created_at', { ascending: false }),
+        db.from('guests').select('bill_id').eq('phone', user.phone),
+      ]);
+
+      if (e1) throw e1;
+      if (e2) throw e2;
+
+      let joined = [];
+      if (guestRows && guestRows.length > 0) {
+        const ownedIds   = (owned || []).map(b => b.id);
+        const foreignIds = guestRows.map(r => r.bill_id).filter(id => !ownedIds.includes(id));
+        if (foreignIds.length > 0) {
+          const { data: joinedBills } = await db
+            .from('bills').select('*').in('id', foreignIds).order('created_at', { ascending: false });
+          joined = joinedBills || [];
+        }
+      }
+
+      const allBills = [...(owned || []), ...joined]
+        .filter((b, i, arr) => arr.findIndex(x => x.id === b.id) === i)
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+      renderDashboard(allBills, owned || []);
+    } catch (err) {
+      console.error(err);
+      setHTML('active-bills', `
+        <div class="error-state">
+          <h3>Could not load bills</h3>
+          <p>Check your connection and <a href="" style="color:var(--accent);">refresh</a>.</p>
+        </div>
+      `);
+    }
+  }
+
+  // ── Compute share for a bill card preview ────────────────
+  // Fetches all claims (not just mine) so split ratios are accurate.
+  async function getMyShare(billId) {
+    const [{ data: allClaims }, { data: items }] = await Promise.all([
+      db.from('claims').select('*').eq('bill_id', billId),
+      db.from('items').select('*').eq('bill_id', billId),
+    ]);
+
+    if (!allClaims || !items) return 0;
+
+    const myClaims = allClaims.filter(c => c.guest_phone === user.phone);
+    if (myClaims.length === 0) return 0;
+
+    const itemMap = Object.fromEntries(items.map(i => [i.id, i]));
+    const seen    = new Set();
+    let total     = 0;
+
+    for (const c of myClaims) {
+      const key = `${c.item_id}-${c.unit_index}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const item = itemMap[c.item_id];
+      if (!item) continue;
+      const unitClaims = allClaims.filter(x => x.item_id === c.item_id && x.unit_index === c.unit_index);
+      total += item.price / unitClaims.length;
+    }
+    return total;
+  }
+
+  // ── Render ───────────────────────────────────────────────
+  async function renderDashboard(allBills, ownedBills) {
+    const active = allBills.filter(b => b.status === 'active' || b.status === 'setup');
+    const closed = allBills.filter(b => b.status === 'closed');
+
+    setText('dash-subtitle', `${allBills.length} bill${allBills.length !== 1 ? 's' : ''} total`);
+
+    if (active.length === 0) {
+      setHTML('active-bills', `
+        <div class="empty">
+          <div class="empty-icon">🧾</div>
+          <h3>No active bills</h3>
+          <p>Create a new bill to split a receipt with friends.</p>
+        </div>
+      `);
+    } else {
+      const cards = await Promise.all(active.map(b => renderBillCard(b, ownedBills)));
+      setHTML('active-bills', cards.join(''));
+    }
+
+    if (closed.length > 0) {
+      show($('closed-section'));
+      const cards = await Promise.all(closed.map(b => renderBillCard(b, ownedBills)));
+      setHTML('closed-bills', cards.join(''));
+
+      $('closed-accordion-head').addEventListener('click', () => {
+        const body    = $('closed-bills');
+        const chevron = $('closed-chevron');
+        const isOpen  = body.classList.toggle('open');
+        chevron.classList.toggle('open', isOpen);
+      });
+    }
+
+    $$('.bill-card').forEach(card => {
+      const id     = card.dataset.id;
+      const status = card.dataset.status;
+      card.addEventListener('click', () => {
+        navigateTo(status === 'setup' ? `/setup/${id}` : `/bill/${id}`);
+      });
+    });
+  }
+
+  async function renderBillCard(bill, ownedBills) {
+    const isOwner    = ownedBills.some(b => b.id === bill.id);
+    const [myShare, guestsRes] = await Promise.all([
+      getMyShare(bill.id),
+      db.from('guests').select('id').eq('bill_id', bill.id),
+    ]);
+    const guestCount = (guestsRes.data || []).length;
+
+    const badgeClass = bill.status === 'active' ? 'badge-active'
+                     : bill.status === 'setup'  ? 'badge-setup'
+                     : 'badge-closed';
+    const badgeLabel = bill.status === 'active' ? 'Active'
+                     : bill.status === 'setup'  ? 'Setting up'
+                     : 'Closed';
+
+    return `
+      <div class="bill-card fade-up" data-id="${bill.id}" data-status="${bill.status}">
+        <div class="bill-card-top">
+          <div class="bill-card-name">${escHtml(bill.name)}</div>
+          <span class="badge ${badgeClass}">${badgeLabel}</span>
+        </div>
+        <div class="bill-card-meta">
+          <span>${formatDateShort(bill.created_at)}</span>
+          <span>${guestCount} guest${guestCount !== 1 ? 's' : ''}</span>
+          ${isOwner ? '<span>You created this</span>' : ''}
+        </div>
+        <div class="bill-card-footer">
+          <span class="bill-card-yours">
+            ${myShare > 0 ? `Your share: ${fmt(myShare)}` : '&nbsp;'}
+          </span>
+          <span class="bill-card-total">${fmt(bill.grand_total)}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  loadBills();
+</script>
+</body>
+</html>
