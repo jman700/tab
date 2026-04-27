@@ -120,6 +120,31 @@
   <button class="btn btn-primary btn-full mt-16" id="save-expense-btn">Add Expense</button>
 </div>
 
+<!-- Settle-Up Sheet -->
+<div class="sheet-backdrop" id="settle-backdrop" style="display:none;"></div>
+<div class="sheet" id="settle-sheet" style="display:none;">
+  <div class="sheet-handle"></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <h2 style="margin:0;">Settle Up</h2>
+    <button class="btn btn-ghost btn-sm" id="close-settle-btn">✕</button>
+  </div>
+  <p id="settle-description" style="font-size:15px;margin-bottom:16px;"></p>
+  <div class="field">
+    <label>How did you pay?</label>
+    <div class="toggle-group" style="margin-top:6px;">
+      <button class="toggle-btn active" data-settle-method="venmo">Venmo</button>
+      <button class="toggle-btn" data-settle-method="cash">Cash</button>
+      <button class="toggle-btn" data-settle-method="other">Other</button>
+    </div>
+  </div>
+  <div id="venmo-settle-wrap" style="margin-top:12px;"></div>
+  <div class="field" style="margin-top:12px;">
+    <label for="settle-note">Note <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;">(optional)</span></label>
+    <input class="input" id="settle-note" type="text" placeholder="Optional note…" autocomplete="off" />
+  </div>
+  <button class="btn btn-primary btn-full mt-16" id="record-settle-btn">Mark as Settled</button>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="/js/config.js"></script>
 <script src="/js/auth.js"></script>
@@ -742,30 +767,5 @@
 
   init();
 </script>
-<!-- Settle-Up Sheet -->
-<div class="sheet-backdrop" id="settle-backdrop" style="display:none;"></div>
-<div class="sheet" id="settle-sheet" style="display:none;">
-  <div class="sheet-handle"></div>
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-    <h2 style="margin:0;">Settle Up</h2>
-    <button class="btn btn-ghost btn-sm" id="close-settle-btn">✕</button>
-  </div>
-  <p id="settle-description" style="font-size:15px;margin-bottom:16px;"></p>
-  <div class="field">
-    <label>How did you pay?</label>
-    <div class="toggle-group" style="margin-top:6px;">
-      <button class="toggle-btn active" data-settle-method="venmo">Venmo</button>
-      <button class="toggle-btn" data-settle-method="cash">Cash</button>
-      <button class="toggle-btn" data-settle-method="other">Other</button>
-    </div>
-  </div>
-  <div id="venmo-settle-wrap" style="margin-top:12px;"></div>
-  <div class="field" style="margin-top:12px;">
-    <label for="settle-note">Note <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;">(optional)</span></label>
-    <input class="input" id="settle-note" type="text" placeholder="Optional note…" autocomplete="off" />
-  </div>
-  <button class="btn btn-primary btn-full mt-16" id="record-settle-btn">Mark as Settled</button>
-</div>
-
 </body>
 </html>
