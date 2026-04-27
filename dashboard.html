@@ -66,10 +66,10 @@
   </div>
 
   <!-- Closed Bills (accordion) -->
-  <div id="closed-section" class="mt-24" style="display:none;">
+  <div id="closed-section" class="mt-24">
     <div class="section-divider">
       <h2 class="accordion-head" id="closed-accordion-head">
-        Closed
+        Closed<span class="accordion-count" id="closed-count"></span>
         <span class="accordion-chevron" id="closed-chevron">›</span>
       </h2>
     </div>
@@ -182,18 +182,21 @@
       setHTML('active-bills', cards.join(''));
     }
 
+    setText('closed-count', closed.length > 0 ? ` (${closed.length})` : '');
+
     if (closed.length > 0) {
-      show($('closed-section'));
       const cards = await Promise.all(closed.map(b => renderBillCard(b, ownedBills)));
       setHTML('closed-bills', cards.join(''));
-
-      $('closed-accordion-head').addEventListener('click', () => {
-        const body    = $('closed-bills');
-        const chevron = $('closed-chevron');
-        const isOpen  = body.classList.toggle('open');
-        chevron.classList.toggle('open', isOpen);
-      });
+    } else {
+      setHTML('closed-bills', `<p style="font-size:14px;color:var(--text-muted);padding:12px 0;">No closed bills yet.</p>`);
     }
+
+    $('closed-accordion-head').addEventListener('click', () => {
+      const body    = $('closed-bills');
+      const chevron = $('closed-chevron');
+      const isOpen  = body.classList.toggle('open');
+      chevron.classList.toggle('open', isOpen);
+    });
 
     $$('.bill-card').forEach(card => {
       const id     = card.dataset.id;

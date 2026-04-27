@@ -801,10 +801,11 @@ h3 { font-size: 18px; }
   padding: 4px 0;
   user-select: none;
 }
-.accordion-chevron { font-size: 18px; color: var(--text-muted); transition: transform var(--transition); }
+.accordion-chevron { font-size: 18px; color: var(--text-muted); transition: transform 0.22s ease; }
 .accordion-chevron.open { transform: rotate(90deg); }
-.accordion-body { display: none; margin-top: 12px; }
-.accordion-body.open { display: block; }
+.accordion-count { font-size: 13px; font-weight: 400; color: var(--text-muted); margin-left: 6px; }
+.accordion-body { overflow: hidden; max-height: 0; transition: max-height 0.28s ease; }
+.accordion-body.open { max-height: 3000px; }
 
 /* ── Toast ─────────────────────────────────────────────────── */
 .toast-container {
