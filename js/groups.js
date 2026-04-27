@@ -29,13 +29,26 @@ const Groups = (() => {
   }
 
   async function getMyGroups(phone) {
-    const { data, error } = await db
+    // Step 1: get the group IDs this user belongs to, in join order.
+    const { data: rows, error: e1 } = await db
       .from('group_members')
-      .select('group_id, groups(*)')
+      .select('group_id')
       .eq('phone', phone)
       .order('joined_at', { ascending: false });
-    if (error) return { error };
-    return { data: (data || []).map(r => r.groups).filter(Boolean) };
+    if (e1) return { error: e1 };
+    if (!rows?.length) return { data: [] };
+
+    // Step 2: fetch the actual group rows by ID.
+    const ids = rows.map(r => r.group_id);
+    const { data: groups, error: e2 } = await db
+      .from('groups')
+      .select('*')
+      .in('id', ids);
+    if (e2) return { error: e2 };
+
+    // Restore join order (newest joined first).
+    const orderMap = Object.fromEntries(ids.map((id, i) => [id, i]));
+    return { data: (groups || []).sort((a, b) => (orderMap[a.id] ?? 999) - (orderMap[b.id] ?? 999)) };
   }
 
   async function getGroup(id) {
