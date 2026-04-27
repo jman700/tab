@@ -28,7 +28,7 @@
   <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:16px;">
     <div>
       <h1 style="margin-bottom:4px;">Admin</h1>
-      <p class="text-muted" style="font-size:14px;">Manage all user accounts.</p>
+      <p class="text-muted" style="font-size:14px;">Manage all accounts and bill guests.</p>
     </div>
     <div style="display:flex;gap:8px;flex-shrink:0;">
       <input class="input" id="search-input" type="search" placeholder="Search name or phone…"
@@ -42,18 +42,19 @@
   </div>
 </main>
 
-<!-- Edit User Sheet -->
+<!-- Edit Sheet (accounts + guests) -->
 <div class="sheet-backdrop" id="edit-backdrop" style="display:none;"></div>
 <div class="sheet" id="edit-sheet" style="display:none;">
   <div class="sheet-handle"></div>
-  <h2 style="margin-bottom:16px;" id="edit-title">Edit User</h2>
+  <h2 style="margin-bottom:16px;" id="edit-title">Edit</h2>
   <input type="hidden" id="edit-phone" />
 
   <div class="field mb-12">
     <label for="edit-name">Name</label>
     <input class="input" id="edit-name" type="text" />
   </div>
-  <div class="field mb-12">
+
+  <div class="field mb-12" id="edit-venmo-wrap">
     <label for="edit-venmo">Venmo Handle</label>
     <div style="display:flex;align-items:stretch;">
       <span style="display:flex;align-items:center;padding:0 12px;background:var(--surface);border:1px solid var(--border);border-right:none;border-radius:var(--radius-sm) 0 0 var(--radius-sm);color:var(--text-muted);flex-shrink:0;">@</span>
@@ -61,12 +62,14 @@
              style="border-radius:0 var(--radius-sm) var(--radius-sm) 0;border-left:none;" />
     </div>
   </div>
-  <div class="field mb-16" style="display:flex;align-items:center;gap:10px;">
+
+  <div class="field mb-16" id="edit-admin-wrap" style="display:flex;align-items:center;gap:10px;">
     <input type="checkbox" id="edit-admin" style="width:16px;height:16px;cursor:pointer;" />
     <label for="edit-admin" style="font-size:14px;cursor:pointer;text-transform:none;letter-spacing:0;color:var(--text);">Admin access</label>
   </div>
 
   <button class="btn btn-primary btn-full" id="edit-save-btn">Save Changes</button>
+  <button class="btn btn-secondary btn-full mt-8 hidden" id="edit-promote-btn">Create Account for This Person</button>
   <button class="btn btn-danger btn-full mt-8" id="edit-delete-btn">Delete Account</button>
   <button class="btn btn-ghost btn-full mt-8" id="edit-cancel-btn">Cancel</button>
 </div>
@@ -80,10 +83,11 @@
   if (!user) throw new Error('Not authenticated');
 
   let allUsers   = [];
+  let allGuests  = []; // unique guests not in tab.users
   let editTarget = null;
+  let editIsGuest = false;
 
   async function init() {
-    // Verify admin access
     const { data: me } = await db.from('users').select('is_admin, phone').eq('phone', user.phone).single();
     if (!me?.is_admin) {
       setHTML('user-list', `
@@ -96,105 +100,248 @@
       `);
       return;
     }
-    loadUsers();
+    loadAll();
   }
 
-  async function loadUsers() {
-    const { data, error } = await db.from('users').select('*').order('created_at', { ascending: false });
-    if (error) {
-      setHTML('user-list', `<div class="error-state"><h3>Load failed</h3><p>${escHtml(error.message)}</p></div>`);
+  async function loadAll() {
+    const [usersRes, guestsRes] = await Promise.all([
+      db.from('users').select('*').order('created_at', { ascending: false }),
+      db.from('guests').select('phone, name, joined_at')
+        .not('phone', 'like', '@%')
+        .order('joined_at', { ascending: false }),
+    ]);
+
+    if (usersRes.error) {
+      setHTML('user-list', `<div class="error-state"><h3>Load failed</h3><p>${escHtml(usersRes.error.message)}</p></div>`);
       return;
     }
-    allUsers = data || [];
-    renderUsers(allUsers);
+
+    allUsers = usersRes.data || [];
+
+    // Deduplicate guests; exclude phones already in users
+    const userPhones = new Set(allUsers.map(u => u.phone));
+    const seen = new Set(userPhones);
+    const uniqueGuests = [];
+    for (const g of (guestsRes.data || [])) {
+      if (!seen.has(g.phone)) {
+        seen.add(g.phone);
+        uniqueGuests.push(g);
+      }
+    }
+    allGuests = uniqueGuests;
+
+    renderAll();
   }
 
-  function renderUsers(users) {
+  function renderAll() {
+    const q = $('search-input').value.toLowerCase();
+
+    const users = q
+      ? allUsers.filter(u => u.name.toLowerCase().includes(q) || u.phone.includes(q))
+      : allUsers;
+
+    const guests = q
+      ? allGuests.filter(g => g.name.toLowerCase().includes(q) || g.phone.includes(q))
+      : allGuests;
+
+    let html = '';
+
+    // ── Accounts section ──────────────────────────────────────
+    html += `
+      <div class="section-divider" style="margin-bottom:12px;">
+        <h2>Accounts <span style="font-size:14px;font-weight:400;color:var(--text-muted);">(${users.length})</span></h2>
+      </div>`;
+
     if (users.length === 0) {
-      setHTML('user-list', '<div class="empty"><p>No users found.</p></div>');
-      return;
-    }
-    setHTML('user-list', users.map(u => `
-      <div class="bill-card" style="cursor:pointer;" onclick="openEdit('${u.phone}')">
-        <div class="bill-card-top">
-          <div>
-            <div class="bill-card-name">${escHtml(u.name)}</div>
-            <div class="bill-card-meta" style="margin-bottom:0;">
-              <span>${Auth.formatPhone(u.phone)}</span>
-              ${u.venmo_handle ? `<span>@${escHtml(u.venmo_handle)}</span>` : ''}
-              ${u.is_admin ? '<span style="color:var(--accent);">Admin</span>' : ''}
+      html += '<div class="empty" style="margin-bottom:24px;"><p>No accounts found.</p></div>';
+    } else {
+      html += users.map(u => `
+        <div class="bill-card" style="cursor:pointer;" onclick="openEdit('${escHtml(u.phone)}', false)">
+          <div class="bill-card-top">
+            <div>
+              <div class="bill-card-name">${escHtml(u.name)}</div>
+              <div class="bill-card-meta" style="margin-bottom:0;">
+                <span>${Auth.formatPhone(u.phone)}</span>
+                ${u.venmo_handle ? `<span>@${escHtml(u.venmo_handle)}</span>` : ''}
+                ${u.is_admin ? '<span style="color:var(--accent);">Admin</span>' : ''}
+              </div>
             </div>
+            <span class="text-muted" style="font-size:12px;">${formatDateShort(u.created_at)}</span>
           </div>
-          <span class="text-muted" style="font-size:12px;">${formatDateShort(u.created_at)}</span>
         </div>
+      `).join('');
+    }
+
+    // ── Bill Guests section ───────────────────────────────────
+    html += `
+      <div class="section-divider" style="margin-top:28px;margin-bottom:4px;">
+        <h2>Bill Guests <span style="font-size:14px;font-weight:400;color:var(--text-muted);">(${guests.length})</span></h2>
       </div>
-    `).join(''));
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+        On bills but haven't created an account yet, or signed in before accounts were tracked.
+      </p>`;
+
+    if (guests.length === 0) {
+      html += '<div class="empty"><p>No guest-only users found.</p></div>';
+    } else {
+      html += guests.map(g => `
+        <div class="bill-card" style="cursor:pointer;" onclick="openEdit('${escHtml(g.phone)}', true)">
+          <div class="bill-card-top">
+            <div>
+              <div class="bill-card-name">${escHtml(g.name)}</div>
+              <div class="bill-card-meta" style="margin-bottom:0;">
+                <span>${Auth.formatPhone(g.phone)}</span>
+              </div>
+            </div>
+            <span class="badge badge-setup" style="font-size:10px;flex-shrink:0;">No account</span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    setHTML('user-list', html);
   }
 
-  function openEdit(phone) {
-    editTarget = allUsers.find(u => u.phone === phone);
-    if (!editTarget) return;
-    setText('edit-title', `Edit — ${editTarget.name}`);
-    $('edit-phone').value   = editTarget.phone;
-    $('edit-name').value    = editTarget.name;
-    $('edit-venmo').value   = editTarget.venmo_handle || '';
-    $('edit-admin').checked = editTarget.is_admin || false;
+  function openEdit(phone, isGuest) {
+    editIsGuest = isGuest;
+
+    if (isGuest) {
+      editTarget = allGuests.find(g => g.phone === phone);
+      if (!editTarget) return;
+      setText('edit-title', `Edit Guest — ${editTarget.name}`);
+      $('edit-phone').value   = editTarget.phone;
+      $('edit-name').value    = editTarget.name;
+      $('edit-venmo').value   = '';
+      $('edit-admin').checked = false;
+      $('edit-venmo-wrap').style.display  = 'none';
+      $('edit-admin-wrap').style.display  = 'none';
+      $('edit-delete-btn').textContent    = 'Remove from All Bills';
+      $('edit-delete-btn').className      = 'btn btn-ghost btn-full mt-8';
+      $('edit-delete-btn').style.color    = 'var(--red)';
+      show($('edit-promote-btn'));
+    } else {
+      editTarget = allUsers.find(u => u.phone === phone);
+      if (!editTarget) return;
+      setText('edit-title', `Edit — ${editTarget.name}`);
+      $('edit-phone').value   = editTarget.phone;
+      $('edit-name').value    = editTarget.name;
+      $('edit-venmo').value   = editTarget.venmo_handle || '';
+      $('edit-admin').checked = editTarget.is_admin || false;
+      $('edit-venmo-wrap').style.display  = '';
+      $('edit-admin-wrap').style.display  = 'flex';
+      $('edit-delete-btn').textContent    = 'Delete Account';
+      $('edit-delete-btn').className      = 'btn btn-danger btn-full mt-8';
+      $('edit-delete-btn').style.color    = '';
+      hide($('edit-promote-btn'));
+    }
+
     openSheet('edit-backdrop', 'edit-sheet');
   }
 
   $('edit-save-btn').addEventListener('click', async () => {
     const phone = $('edit-phone').value;
     const name  = $('edit-name').value.trim();
-    const venmo = $('edit-venmo').value.trim().replace(/^@/, '');
-    const admin = $('edit-admin').checked;
-
     if (!name) return showToast('Name cannot be empty', 'error');
 
     const btn = $('edit-save-btn');
     btn.disabled = true; btn.textContent = 'Saving…';
 
     try {
-      await Promise.all([
-        db.from('users').update({
-          name,
-          venmo_handle: venmo || null,
-          is_admin:     admin,
-          updated_at:   new Date().toISOString(),
-        }).eq('phone', phone),
-        db.from('guests').update({ name }).eq('phone', phone),
-      ]);
+      if (editIsGuest) {
+        // Update name across all their guest rows
+        const { error } = await db.from('guests').update({ name }).eq('phone', phone);
+        if (error) throw error;
+        // Update local state
+        allGuests = allGuests.map(g => g.phone === phone ? { ...g, name } : g);
+      } else {
+        const venmo = $('edit-venmo').value.trim().replace(/^@/, '');
+        const admin = $('edit-admin').checked;
+        await Promise.all([
+          db.from('users').update({
+            name,
+            venmo_handle: venmo || null,
+            is_admin:     admin,
+            updated_at:   new Date().toISOString(),
+          }).eq('phone', phone),
+          db.from('guests').update({ name }).eq('phone', phone),
+        ]);
+        allUsers = allUsers.map(u => u.phone === phone
+          ? { ...u, name, venmo_handle: venmo || null, is_admin: admin }
+          : u);
+      }
       closeSheet('edit-backdrop', 'edit-sheet');
       showToast('Saved!', 'success');
-      loadUsers();
+      renderAll();
     } catch (err) {
       showToast(`Save failed: ${err?.message || JSON.stringify(err)}`, 'error', 6000);
+    } finally {
       btn.disabled = false; btn.textContent = 'Save Changes';
+    }
+  });
+
+  $('edit-promote-btn').addEventListener('click', async () => {
+    if (!editTarget) return;
+    const name = $('edit-name').value.trim() || editTarget.name;
+    const btn  = $('edit-promote-btn');
+    btn.disabled = true; btn.textContent = 'Creating…';
+
+    try {
+      const { error } = await db.from('users').upsert({
+        phone:      editTarget.phone,
+        name,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'phone', ignoreDuplicates: false });
+      if (error) throw error;
+
+      // Move from guests list to users list
+      const newUser = { phone: editTarget.phone, name, venmo_handle: null, is_admin: false, created_at: new Date().toISOString() };
+      allUsers  = [newUser, ...allUsers];
+      allGuests = allGuests.filter(g => g.phone !== editTarget.phone);
+
+      closeSheet('edit-backdrop', 'edit-sheet');
+      showToast(`Account created for ${name}`, 'success');
+      renderAll();
+    } catch (err) {
+      showToast(`Failed: ${err?.message || JSON.stringify(err)}`, 'error', 6000);
+      btn.disabled = false; btn.textContent = 'Create Account for This Person';
     }
   });
 
   $('edit-delete-btn').addEventListener('click', async () => {
     if (!editTarget) return;
-    if (!confirm(`Delete account for ${editTarget.name} (${editTarget.phone})?\n\nTheir bills and claims will remain but their profile record will be removed.`)) return;
 
-    try {
-      await db.from('users').delete().eq('phone', editTarget.phone);
-      closeSheet('edit-backdrop', 'edit-sheet');
-      showToast('Account deleted', 'success');
-      loadUsers();
-    } catch (err) {
-      showToast(`Delete failed: ${err?.message || JSON.stringify(err)}`, 'error', 6000);
+    if (editIsGuest) {
+      if (!confirm(`Remove ${editTarget.name} (${editTarget.phone}) from all bills?\n\nTheir claims will also be removed.`)) return;
+      try {
+        await Promise.all([
+          db.from('claims').delete().eq('guest_phone', editTarget.phone),
+          db.from('guests').delete().eq('phone', editTarget.phone),
+        ]);
+        allGuests = allGuests.filter(g => g.phone !== editTarget.phone);
+        closeSheet('edit-backdrop', 'edit-sheet');
+        showToast('Guest removed', 'success');
+        renderAll();
+      } catch (err) {
+        showToast(`Failed: ${err?.message || JSON.stringify(err)}`, 'error', 6000);
+      }
+    } else {
+      if (!confirm(`Delete account for ${editTarget.name} (${editTarget.phone})?\n\nTheir bills and claims will remain but their profile will be removed.`)) return;
+      try {
+        await db.from('users').delete().eq('phone', editTarget.phone);
+        allUsers = allUsers.filter(u => u.phone !== editTarget.phone);
+        closeSheet('edit-backdrop', 'edit-sheet');
+        showToast('Account deleted', 'success');
+        renderAll();
+      } catch (err) {
+        showToast(`Failed: ${err?.message || JSON.stringify(err)}`, 'error', 6000);
+      }
     }
   });
 
-  $('edit-cancel-btn').addEventListener('click',  () => closeSheet('edit-backdrop', 'edit-sheet'));
-  $('edit-backdrop').addEventListener('click',    () => closeSheet('edit-backdrop', 'edit-sheet'));
+  $('edit-cancel-btn').addEventListener('click', () => closeSheet('edit-backdrop', 'edit-sheet'));
+  $('edit-backdrop').addEventListener('click',   () => closeSheet('edit-backdrop', 'edit-sheet'));
 
-  $('search-input').addEventListener('input', () => {
-    const q = $('search-input').value.toLowerCase();
-    renderUsers(q ? allUsers.filter(u =>
-      u.name.toLowerCase().includes(q) || u.phone.includes(q)
-    ) : allUsers);
-  });
+  $('search-input').addEventListener('input', renderAll);
 
   init();
 </script>
