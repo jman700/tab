@@ -208,7 +208,7 @@
   // ── Invite ────────────────────────────────────────────────
   async function shareInvite() {
     if (!group) return;
-    const url  = `${window.location.origin}/group.html?id=${groupId}&token=${group.invite_token}`;
+    const url  = `${window.location.origin}/group.html?id=${encodeURIComponent(groupId)}&token=${encodeURIComponent(group.invite_token)}`;
     const text = `Join "${group.name}" on TAB: ${url}`;
     if (navigator.share) {
       try { await navigator.share({ title: `Join ${group.name}`, text, url }); }

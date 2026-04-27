@@ -297,7 +297,7 @@
     }
     setHTML('groups-list', data.map(renderGroupCard).join(''));
     [...$('groups-list').querySelectorAll('.group-card')].forEach(card => {
-      card.addEventListener('click', () => navigateTo(`/group.html?id=${card.dataset.id}`));
+      card.addEventListener('click', () => navigateTo(`/group.html?id=${encodeURIComponent(card.dataset.id)}`));
     });
   }
 

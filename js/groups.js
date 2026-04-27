@@ -19,7 +19,11 @@ const Groups = (() => {
     const { error: e2 } = await db
       .from('group_members')
       .insert({ group_id: group.id, phone, display_name: displayName });
-    if (e2) return { error: e2 };
+    if (e2) {
+      const { error: e3 } = await db.from('groups').delete().eq('id', group.id);
+      if (e3) console.error('Rollback failed, orphaned group:', group.id, e3);
+      return { error: e2 };
+    }
 
     return { data: group };
   }
