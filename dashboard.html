@@ -239,7 +239,7 @@
       chevron.classList.toggle('open', isOpen);
     });
 
-    $$('.bill-card').forEach(card => {
+    $$('.bill-card:not(.group-card)').forEach(card => {
       const id     = card.dataset.id;
       const status = card.dataset.status;
       card.addEventListener('click', () => {
