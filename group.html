@@ -652,15 +652,21 @@
   let activeSettleMethod = 'venmo';
 
   function openSettleSheet(card) {
+    const from = card.dataset.from;
+    if (from !== user.phone) {
+      showToast(`${card.dataset.fromName} needs to record this payment`, 'error');
+      return;
+    }
+
     pendingSettle = {
-      from:     card.dataset.from,
+      from:     from,
       fromName: card.dataset.fromName,
       to:       card.dataset.to,
       toName:   card.dataset.toName,
       amount:   parseFloat(card.dataset.amount),
     };
 
-    const isYouPaying = pendingSettle.from === user.phone;
+    const isYouPaying = true;
     setText('settle-description',
       isYouPaying
         ? `You pay ${pendingSettle.toName} ${fmtCurrency(pendingSettle.amount, 'USD')}`
@@ -679,8 +685,9 @@
       setHTML('venmo-settle-wrap', '');
       return;
     }
+    const venmoHref = escHtml(`venmo://paycharge?txn=pay&amount=${pendingSettle.amount.toFixed(2)}&note=${encodeURIComponent('TAB: ' + pendingSettle.toName)}`);
     setHTML('venmo-settle-wrap', `
-      <a href="venmo://paycharge?txn=pay&amount=${pendingSettle.amount.toFixed(2)}&note=${encodeURIComponent('TAB: ' + pendingSettle.toName)}"
+      <a href="${venmoHref}"
          class="btn btn-secondary btn-full" style="display:block;text-align:center;text-decoration:none;">
         Open Venmo — Pay ${fmtCurrency(pendingSettle.amount, 'USD')}
       </a>
