@@ -81,8 +81,9 @@
   </div>
 
   <!-- Owner: close bill -->
-  <div id="owner-controls" class="hidden mt-16 mb-16">
+  <div id="owner-controls" class="hidden mt-16 mb-16" style="display:flex;flex-direction:column;gap:8px;">
     <button class="btn btn-danger btn-full" id="close-bill-btn">Close Bill</button>
+    <button class="btn btn-ghost btn-full" id="delete-bill-btn" style="color:var(--red);">Delete Bill</button>
   </div>
 
   <!-- Closed bill notice -->
@@ -90,6 +91,10 @@
     <div style="font-size:24px;margin-bottom:8px;">✓</div>
     <h3 style="font-family:var(--font-display);font-weight:500;margin-bottom:4px;">Bill Closed</h3>
     <p class="text-muted" style="font-size:14px;">This bill has been finalized.</p>
+    <div class="hidden mt-12" id="reopen-wrap" style="display:flex;flex-direction:column;gap:8px;">
+      <button class="btn btn-secondary btn-full" id="reopen-bill-btn">Reopen Bill</button>
+      <button class="btn btn-ghost btn-full" id="delete-closed-btn" style="color:var(--red);">Delete Bill</button>
+    </div>
   </div>
 
 </main>
@@ -136,6 +141,7 @@
   <div id="summary-list"></div>
   <hr class="summary-divider" />
   <div id="summary-totals"></div>
+  <div id="venmo-pay-wrap"></div>
   <button class="btn btn-primary btn-full mt-16" id="close-summary-btn">Done</button>
 </div>
 
@@ -198,8 +204,9 @@
   let billCurrency   = 'USD';
   let showConverted  = false;
   let exchangeRate   = null;
-  let kioskGuest     = null; // guest currently "active" for claiming
-  let pendingGuests  = [];   // staging list in add-guest sheet
+  let kioskGuest     = null;
+  let pendingGuests  = [];
+  let ownerVenmo     = null; // bill creator's Venmo handle (if set)
 
   function display(amount) {
     if (showConverted && exchangeRate) return fmtCurrency((amount || 0) * exchangeRate, 'USD');
@@ -302,6 +309,12 @@
       db.from('claims').select('*').eq('bill_id', billId),
     ]);
 
+    if (billRes.data) {
+      const { data: ownerProfile } = await db.from('users')
+        .select('venmo_handle').eq('phone', billRes.data.created_by_phone).single();
+      ownerVenmo = ownerProfile?.venmo_handle || null;
+    }
+
     if (billRes.error || !billRes.data) { navigateTo('/dashboard.html'); return; }
 
     bill   = billRes.data;
@@ -353,6 +366,7 @@
       show($('closed-notice'));
       hide($('owner-controls'));
       hide($('owner-actions'));
+      if (isOwner) show($('reopen-wrap'));
     } else if (isOwner) {
       show($('owner-controls'));
       show($('owner-actions'));
@@ -606,6 +620,30 @@
     setText('guest-count', guests.length);
     showToast(`${name} removed`);
   }
+
+  // ── Owner: reopen bill ────────────────────────────────────
+  $('reopen-bill-btn').addEventListener('click', async () => {
+    if (!isOwner || !confirm('Reopen this bill? Guests will be able to change their claims again.')) return;
+    const { error } = await db.from('bills').update({ status: 'active', closed_at: null }).eq('id', billId);
+    if (error) return showToast('Could not reopen — try again', 'error');
+    bill = { ...bill, status: 'active', closed_at: null };
+    hide($('closed-notice'));
+    show($('owner-controls'));
+    show($('owner-actions'));
+    renderItems();
+    showToast('Bill reopened', 'success');
+  });
+
+  // ── Owner: delete bill ────────────────────────────────────
+  async function deleteBill() {
+    if (!isOwner) return;
+    if (!confirm(`Delete "${bill.name}"? This cannot be undone — all items, guests, and claims will be removed.`)) return;
+    const { error } = await db.from('bills').delete().eq('id', billId);
+    if (error) return showToast('Could not delete — try again', 'error');
+    navigateTo('/dashboard.html');
+  }
+  $('delete-bill-btn').addEventListener('click',   deleteBill);
+  $('delete-closed-btn').addEventListener('click', deleteBill);
 
   // ── Owner: close bill ─────────────────────────────────────
   $('close-bill-btn').addEventListener('click', async () => {
@@ -879,6 +917,30 @@
         <span class="val">${display(bill.grand_total)}</span>
       </div>
     `);
+
+    // Venmo pay button — shown to non-owners when owner has a Venmo handle and user owes something
+    const venmoWrap = $('venmo-pay-wrap');
+    const myShare   = getPersonShare(user.phone, claims, items, guests, bill);
+    if (ownerVenmo && !isOwner && myShare > 0) {
+      const ownerName  = guests.find(g => g.phone === bill.created_by_phone)?.name || 'the owner';
+      const rawAmt     = showConverted && exchangeRate ? myShare * exchangeRate : myShare;
+      const venmoAmt   = rawAmt.toFixed(2);
+      const venmoNote  = encodeURIComponent(bill.name);
+      const venmoUrl   = `venmo://paycharge?txn=pay&recipients=${encodeURIComponent(ownerVenmo)}&amount=${venmoAmt}&note=${venmoNote}`;
+      setHTML('venmo-pay-wrap', `
+        <div style="margin-top:20px;padding:16px;background:var(--surface-2);border-radius:var(--radius);text-align:center;">
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">
+            Pay <strong style="color:var(--text);">@${escHtml(ownerVenmo)}</strong> (${escHtml(ownerName)})
+          </p>
+          <a href="${venmoUrl}" class="btn btn-primary btn-full" style="text-decoration:none;display:block;">
+            Pay ${display(myShare)} on Venmo
+          </a>
+          <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">Opens the Venmo app with your amount pre-filled.</p>
+        </div>
+      `);
+    } else {
+      setHTML('venmo-pay-wrap', '');
+    }
   }
 
   // ── Realtime ──────────────────────────────────────────────

@@ -93,6 +93,22 @@ CREATE POLICY "public_all" ON tab.items  FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "public_all" ON tab.guests FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "public_all" ON tab.claims FOR ALL USING (true) WITH CHECK (true);
 
+-- ── Users ───────────────────────────────────────────────────
+-- Persistent profile table keyed by phone number.
+CREATE TABLE tab.users (
+  phone        TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  venmo_handle TEXT,
+  is_admin     BOOLEAN DEFAULT FALSE,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE tab.users ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public_all" ON tab.users FOR ALL USING (true) WITH CHECK (true);
+
+-- To make yourself admin, run this after your first login:
+--   UPDATE tab.users SET is_admin = TRUE WHERE phone = 'YOUR_PHONE_DIGITS_ONLY';
+
 -- ── Migrations ───────────────────────────────────────────────
 -- Run these if you already created the tables above (new columns added later):
 ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS currency      TEXT    DEFAULT 'USD';

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tab — Admin</title>
+  <meta name="theme-color" content="#B8872A" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+<header class="header">
+  <div class="header-inner">
+    <a href="/dashboard.html" class="btn btn-ghost btn-sm">← Back</a>
+    <a href="/dashboard.html" class="brand">
+      <svg width="16" height="19" viewBox="0 0 30 36" fill="none" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="27" height="30" rx="3" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M7 12h16M7 18h16M7 24h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      tab
+    </a>
+    <div style="width:72px;"></div>
+  </div>
+</header>
+
+<main class="container page" style="padding-top:28px;">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:16px;">
+    <div>
+      <h1 style="margin-bottom:4px;">Admin</h1>
+      <p class="text-muted" style="font-size:14px;">Manage all user accounts.</p>
+    </div>
+    <div style="display:flex;gap:8px;flex-shrink:0;">
+      <input class="input" id="search-input" type="search" placeholder="Search name or phone…"
+             style="width:200px;padding:8px 12px;font-size:13px;" />
+    </div>
+  </div>
+
+  <div id="user-list">
+    <div class="bill-card-skeleton"><div class="skeleton" style="height:16px;width:60%;margin-bottom:8px;"></div><div class="skeleton" style="height:13px;width:40%;"></div></div>
+    <div class="bill-card-skeleton mt-8"><div class="skeleton" style="height:16px;width:50%;margin-bottom:8px;"></div><div class="skeleton" style="height:13px;width:35%;"></div></div>
+  </div>
+</main>
+
+<!-- Edit User Sheet -->
+<div class="sheet-backdrop" id="edit-backdrop" style="display:none;"></div>
+<div class="sheet" id="edit-sheet" style="display:none;">
+  <div class="sheet-handle"></div>
+  <h2 style="margin-bottom:16px;" id="edit-title">Edit User</h2>
+  <input type="hidden" id="edit-phone" />
+
+  <div class="field mb-12">
+    <label for="edit-name">Name</label>
+    <input class="input" id="edit-name" type="text" />
+  </div>
+  <div class="field mb-12">
+    <label for="edit-venmo">Venmo Handle</label>
+    <div style="display:flex;align-items:center;">
+      <span style="padding:11px 0 11px 14px;background:var(--surface);border:1px solid var(--border);border-right:none;border-radius:var(--radius-sm) 0 0 var(--radius-sm);color:var(--text-muted);">@</span>
+      <input class="input" id="edit-venmo" type="text" placeholder="optional"
+             style="border-radius:0 var(--radius-sm) var(--radius-sm) 0;border-left:none;" />
+    </div>
+  </div>
+  <div class="field mb-16" style="display:flex;align-items:center;gap:10px;">
+    <input type="checkbox" id="edit-admin" style="width:16px;height:16px;cursor:pointer;" />
+    <label for="edit-admin" style="font-size:14px;cursor:pointer;text-transform:none;letter-spacing:0;color:var(--text);">Admin access</label>
+  </div>
+
+  <button class="btn btn-primary btn-full" id="edit-save-btn">Save Changes</button>
+  <button class="btn btn-danger btn-full mt-8" id="edit-delete-btn">Delete Account</button>
+  <button class="btn btn-ghost btn-full mt-8" id="edit-cancel-btn">Cancel</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/config.js"></script>
+<script src="/js/auth.js"></script>
+<script src="/js/utils.js"></script>
+<script>
+  const user = Auth.requireAuth();
+  if (!user) throw new Error('Not authenticated');
+
+  let allUsers   = [];
+  let editTarget = null;
+
+  async function init() {
+    // Verify admin access
+    const { data: me } = await db.from('users').select('is_admin, phone').eq('phone', user.phone).single();
+    if (!me?.is_admin) {
+      setHTML('user-list', `
+        <div class="error-state">
+          <h3>Access Denied</h3>
+          <p>Your account does not have admin access.<br>
+          Your phone: <strong>${user.phone}</strong><br>
+          Run in Supabase SQL: <code>UPDATE tab.users SET is_admin = TRUE WHERE phone = '${user.phone}';</code></p>
+        </div>
+      `);
+      return;
+    }
+    loadUsers();
+  }
+
+  async function loadUsers() {
+    const { data, error } = await db.from('users').select('*').order('created_at', { ascending: false });
+    if (error) {
+      setHTML('user-list', `<div class="error-state"><h3>Load failed</h3><p>${escHtml(error.message)}</p></div>`);
+      return;
+    }
+    allUsers = data || [];
+    renderUsers(allUsers);
+  }
+
+  function renderUsers(users) {
+    if (users.length === 0) {
+      setHTML('user-list', '<div class="empty"><p>No users found.</p></div>');
+      return;
+    }
+    setHTML('user-list', users.map(u => `
+      <div class="bill-card" style="cursor:pointer;" onclick="openEdit('${u.phone}')">
+        <div class="bill-card-top">
+          <div>
+            <div class="bill-card-name">${escHtml(u.name)}</div>
+            <div class="bill-card-meta" style="margin-bottom:0;">
+              <span>${Auth.formatPhone(u.phone)}</span>
+              ${u.venmo_handle ? `<span>@${escHtml(u.venmo_handle)}</span>` : ''}
+              ${u.is_admin ? '<span style="color:var(--accent);">Admin</span>' : ''}
+            </div>
+          </div>
+          <span class="text-muted" style="font-size:12px;">${formatDateShort(u.created_at)}</span>
+        </div>
+      </div>
+    `).join(''));
+  }
+
+  function openEdit(phone) {
+    editTarget = allUsers.find(u => u.phone === phone);
+    if (!editTarget) return;
+    setText('edit-title', `Edit — ${editTarget.name}`);
+    $('edit-phone').value   = editTarget.phone;
+    $('edit-name').value    = editTarget.name;
+    $('edit-venmo').value   = editTarget.venmo_handle || '';
+    $('edit-admin').checked = editTarget.is_admin || false;
+    openSheet('edit-backdrop', 'edit-sheet');
+  }
+
+  $('edit-save-btn').addEventListener('click', async () => {
+    const phone = $('edit-phone').value;
+    const name  = $('edit-name').value.trim();
+    const venmo = $('edit-venmo').value.trim().replace(/^@/, '');
+    const admin = $('edit-admin').checked;
+
+    if (!name) return showToast('Name cannot be empty', 'error');
+
+    const btn = $('edit-save-btn');
+    btn.disabled = true; btn.textContent = 'Saving…';
+
+    try {
+      await Promise.all([
+        db.from('users').update({
+          name,
+          venmo_handle: venmo || null,
+          is_admin:     admin,
+          updated_at:   new Date().toISOString(),
+        }).eq('phone', phone),
+        db.from('guests').update({ name }).eq('phone', phone),
+      ]);
+      closeSheet('edit-backdrop', 'edit-sheet');
+      showToast('Saved!', 'success');
+      loadUsers();
+    } catch (err) {
+      showToast(`Save failed: ${err?.message || JSON.stringify(err)}`, 'error', 6000);
+      btn.disabled = false; btn.textContent = 'Save Changes';
+    }
+  });
+
+  $('edit-delete-btn').addEventListener('click', async () => {
+    if (!editTarget) return;
+    if (!confirm(`Delete account for ${editTarget.name} (${editTarget.phone})?\n\nTheir bills and claims will remain but their profile record will be removed.`)) return;
+
+    try {
+      await db.from('users').delete().eq('phone', editTarget.phone);
+      closeSheet('edit-backdrop', 'edit-sheet');
+      showToast('Account deleted', 'success');
+      loadUsers();
+    } catch (err) {
+      showToast(`Delete failed: ${err?.message || JSON.stringify(err)}`, 'error', 6000);
+    }
+  });
+
+  $('edit-cancel-btn').addEventListener('click',  () => closeSheet('edit-backdrop', 'edit-sheet'));
+  $('edit-backdrop').addEventListener('click',    () => closeSheet('edit-backdrop', 'edit-sheet'));
+
+  $('search-input').addEventListener('input', () => {
+    const q = $('search-input').value.toLowerCase();
+    renderUsers(q ? allUsers.filter(u =>
+      u.name.toLowerCase().includes(q) || u.phone.includes(q)
+    ) : allUsers);
+  });
+
+  init();
+</script>
+</body>
+</html>

@@ -105,9 +105,10 @@
     Auth.setUser(name, phone);
 
     try {
-      await db.from('guests')
-        .update({ device_fingerprint: fp, name })
-        .eq('phone', phone);
+      await Promise.all([
+        db.from('guests').update({ device_fingerprint: fp, name }).eq('phone', phone),
+        db.from('users').upsert({ phone, name, updated_at: new Date().toISOString() }, { onConflict: 'phone', ignoreDuplicates: false }),
+      ]);
     } catch { /* non-critical */ }
 
     window.location.replace('/dashboard.html');

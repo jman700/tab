@@ -61,6 +61,14 @@ const Auth = (() => {
     return phone;
   }
 
-  return { getUser, setUser, getFingerprint, logout, requireAuth, normalizePhone, formatPhone };
+  function updateLocalUser(fields) {
+    const user = getUser();
+    if (!user) return null;
+    const updated = { ...user, ...fields };
+    localStorage.setItem(USER_KEY, JSON.stringify(updated));
+    return updated;
+  }
+
+  return { getUser, setUser, updateLocalUser, getFingerprint, logout, requireAuth, normalizePhone, formatPhone };
 
 })();
