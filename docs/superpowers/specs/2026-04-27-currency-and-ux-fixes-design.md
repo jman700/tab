@@ -43,7 +43,7 @@ Five fixes across `index.html`, `js/auth.js`, and `bill.html`:
 
 **Condition:** Only applies when `bill.currency !== 'USD'` and `exchangeRate` is available.
 
-**Change:** The summary sheet always displays amounts in USD as the primary value. The local currency equivalent appears as smaller muted text directly below (per-person rows) or inline after (totals rows).
+**Change:** The summary sheet always displays amounts in USD as the primary value. Since amounts are stored in the bill's native currency, USD values are computed as `amount × exchangeRate`. The local currency equivalent (the raw stored value) appears as smaller muted text directly below (per-person rows) or inline after (totals rows).
 
 - **Per-person share rows:** large coloured USD amount + small muted `MX$xxx` on a second line.
 - **Totals section (Subtotal / Tax / Tip / Total):** USD value + small muted `(MX$xxx)` inline.
