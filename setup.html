@@ -15,7 +15,7 @@
 
 <header class="header">
   <div class="header-inner">
-    <button class="btn btn-ghost btn-sm" id="back-btn">← Back</button>
+    <a href="/dashboard.html" class="btn btn-ghost btn-sm">← Back</a>
     <a href="/dashboard.html" class="brand">
       <svg width="16" height="19" viewBox="0 0 30 36" fill="none" aria-hidden="true">
         <rect x="1.5" y="1.5" width="27" height="30" rx="3" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="1.5"/>
@@ -42,13 +42,13 @@
   <!-- Step 2: Receipt Upload -->
   <div class="setup-section" id="upload-section">
     <h3><span class="step-num">2</span> Upload receipt</h3>
-    <label class="upload-area" id="upload-area" for="receipt-input">
+    <label class="upload-area" id="upload-area">
+      <input type="file" id="receipt-input" accept="image/*"
+             style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
       <div class="upload-icon">📸</div>
       <p>Tap to upload a receipt photo</p>
       <span>JPG, PNG, HEIC supported</span>
     </label>
-    <input type="file" id="receipt-input" accept="image/*"
-           style="position:absolute;opacity:0;width:1px;height:1px;" />
     <img id="receipt-preview" class="upload-preview hidden" alt="Receipt" />
     <button class="btn btn-primary btn-full mt-8 hidden" id="scan-btn">Scan Receipt →</button>
     <div class="processing hidden" id="processing-state">
@@ -164,9 +164,14 @@
 
   // ── Init ─────────────────────────────────────────────────
   async function init() {
-    const pathId = getBillIdFromUrl();
-    if (pathId && pathId !== 'setup') {
-      await loadExistingBill(pathId);
+    try {
+      const pathId = getBillIdFromUrl();
+      const isEditId = pathId && !pathId.includes('.') && pathId !== 'setup';
+      if (isEditId) {
+        await loadExistingBill(pathId);
+      }
+    } catch (err) {
+      console.error('init error:', err);
     }
     bindEvents();
   }
@@ -197,8 +202,6 @@
 
   // ── Events ───────────────────────────────────────────────
   function bindEvents() {
-    $('back-btn').addEventListener('click', () => navigateTo('/dashboard.html'));
-
     const uploadArea = $('upload-area');
     const fileInput  = $('receipt-input');
     // click is handled natively by <label for="receipt-input">
