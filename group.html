@@ -240,34 +240,38 @@
   // ── Balances tab ──────────────────────────────────────────
   async function loadBalances() {
     setHTML('balances-list', '<p style="font-size:14px;color:var(--text-muted);">Computing balances…</p>');
+    try {
+      const [{ data: expenses, error: e1 }, { data: bills, error: e2 }] = await Promise.all([
+        Groups.getExpenses(groupId),
+        Groups.getBillsForGroup(groupId),
+      ]);
 
-    const [{ data: expenses, error: e1 }, { data: bills, error: e2 }] = await Promise.all([
-      Groups.getExpenses(groupId),
-      Groups.getBillsForGroup(groupId),
-    ]);
+      if (e1 || e2) {
+        setHTML('balances-list', '<p style="font-size:14px;color:var(--text-muted);">Could not load balances.</p>');
+        return;
+      }
 
-    if (e1 || e2) {
+      const allExpenses = expenses || [];
+      const allBills    = bills    || [];
+
+      const currencies = [
+        ...allExpenses.map(e => e.currency),
+        ...allBills.map(b => b.currency),
+      ];
+
+      const rates    = await Balance.fetchRates(currencies);
+      const rawNet   = Balance.computeRaw(allExpenses, allBills, members);
+      const byMember = Balance.toUSD(rawNet, members, rates);
+
+      renderBalances(byMember);
+    } catch (err) {
+      console.error('loadBalances failed:', err);
       setHTML('balances-list', '<p style="font-size:14px;color:var(--text-muted);">Could not load balances.</p>');
-      return;
     }
-
-    const allExpenses = expenses || [];
-    const allBills    = bills    || [];
-
-    const currencies = [
-      ...allExpenses.map(e => e.currency),
-      ...allBills.map(b => b.currency),
-    ];
-
-    const rates    = await Balance.fetchRates(currencies);
-    const rawNet   = Balance.computeRaw(allExpenses, allBills, members);
-    const byMember = Balance.toUSD(rawNet, members, rates);
-
-    renderBalances(byMember);
   }
 
   function renderBalances(byMember) {
-    if (byMember.every(m => Math.abs(m.usdNet) < 0.01)) {
+    if (!byMember.some(m => m.partial) && byMember.every(m => Math.abs(m.usdNet) < 0.01)) {
       setHTML('balances-list', `
         <div class="empty">
           <div class="empty-icon">✓</div>
@@ -315,7 +319,7 @@
             <div style="font-size:12px;color:${color};margin-top:2px;">${label}</div>
             ${breakdown}
           </div>
-          <div style="font-size:16px;font-weight:600;color:${color};">${absNet < 0.01 ? '—' : fmtCurrency(absNet, 'USD')}</div>
+          <div style="font-size:16px;font-weight:600;color:${color};">${absNet < 0.01 ? '—' : fmtCurrency(absNet, 'USD')}${m.partial ? '<span style="font-size:10px;color:var(--text-muted);margin-left:2px;">~</span>' : ''}</div>
         </div>
       `;
     }).join(''));
