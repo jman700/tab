@@ -31,6 +31,11 @@
   <h1 style="margin-bottom:6px;" id="page-title">New Bill</h1>
   <p class="text-muted mb-16" style="font-size:14px;">Set up a bill to split with your group.</p>
 
+  <div id="edit-claims-warning" class="hidden" style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:13px;color:var(--text-muted);line-height:1.5;">
+    <strong style="color:var(--text);">Guests have already claimed items.</strong><br>
+    Saving changes will clear <span id="edit-claims-count"></span> existing claim(s) and guests will need to re-claim.
+  </div>
+
   <!-- Step 1: Bill Name -->
   <div class="setup-section">
     <h3><span class="step-num">1</span> Name this bill</h3>
@@ -189,6 +194,7 @@
   let taxIncluded         = false;
   let discountAmount      = 0;
   let isEditMode          = false;
+  let existingClaimsCount = 0;
   let currencyCode        = 'USD';
 
   // ── Init ─────────────────────────────────────────────────
@@ -249,6 +255,14 @@
 
     const { data: dbItems } = await db.from('items').select('*').eq('bill_id', id).order('position');
     items = (dbItems || []).map(i => ({ ...i, tempId: i.id, discount: toNum(i.discount) }));
+
+    // Check for existing claims
+    const { count } = await db.from('claims').select('*', { count: 'exact', head: true }).eq('bill_id', id);
+    existingClaimsCount = count || 0;
+    if (existingClaimsCount > 0) {
+      setText('edit-claims-count', String(existingClaimsCount));
+      show($('edit-claims-warning'));
+    }
 
     $('discount-input').value = discountAmount > 0 ? discountAmount.toFixed(2) : '';
     setActiveTipBtn(tipPct);
@@ -662,6 +676,11 @@
     const name = $('bill-name').value.trim();
     if (!name)              return showToast('Please name this bill', 'error');
     if (items.length === 0) return showToast('Please add at least one item', 'error');
+
+    if (isEditMode && existingClaimsCount > 0) {
+      const ok = confirm(`This bill has ${existingClaimsCount} existing claim(s). Saving will clear them and guests will need to re-claim. Continue?`);
+      if (!ok) return;
+    }
 
     const btn = $('publish-btn');
     btn.disabled    = true;
