@@ -1009,11 +1009,11 @@
     };
 
     const allClaimedBanner = allClaimed && isOwner
-      ? `<div style="background:#1a472a;border:1px solid #2d6a4f;border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
-           <span style="font-size:18px;">✓</span>
+      ? `<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
+           <span style="font-size:16px;color:var(--text-muted);">✓</span>
            <div>
-             <div style="font-size:13px;font-weight:600;color:#74c69d;">All items claimed</div>
-             <div style="font-size:12px;color:#52b788;">Every item on this bill has been claimed.</div>
+             <div style="font-size:13px;font-weight:600;color:var(--text);">All items claimed</div>
+             <div style="font-size:12px;color:var(--text-muted);">Every item on this bill has been claimed.</div>
            </div>
          </div>`
       : '';
