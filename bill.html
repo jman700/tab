@@ -198,6 +198,9 @@
     <button class="btn btn-ghost btn-sm" id="close-add-guest-btn">✕</button>
   </div>
 
+  <button class="btn btn-secondary btn-full mb-8 hidden" id="import-group-btn">
+    Import group members
+  </button>
   <button class="btn btn-secondary btn-full mb-12 hidden" id="import-contacts-btn">
     Import from Contacts
   </button>
@@ -737,6 +740,40 @@
   // User search autocomplete for Add Guests sheet
   attachUserSearch($('new-guest-name'), $('new-guest-phone'));
 
+  // Phone → name lookup: if user types a phone first and there's a match, auto-fill name
+  $('new-guest-phone').addEventListener('blur', async () => {
+    if ($('new-guest-name').value.trim()) return;
+    const phone = Auth.normalizePhone($('new-guest-phone').value.trim());
+    if (!phone) return;
+    const { data: u } = await db.from('users').select('name').eq('phone', phone).maybeSingle();
+    if (u?.name) {
+      $('new-guest-name').value = u.name;
+      showToast(`Found: ${u.name}`, 'success');
+    }
+  });
+
+  $('import-group-btn').addEventListener('click', async () => {
+    const btn = $('import-group-btn');
+    btn.disabled = true;
+    btn.textContent = 'Loading…';
+    try {
+      const { data: groupMembers, error } = await Groups.getMembers(bill.group_id);
+      if (error || !groupMembers) { showToast('Could not load group members', 'error'); return; }
+      const existingPhones = new Set([
+        ...guests.map(g => g.phone),
+        ...pendingGuests.map(g => g.phone),
+        user.phone,
+      ].filter(Boolean));
+      const toAdd = groupMembers.filter(m => m.phone && !existingPhones.has(m.phone));
+      pendingGuests.push(...toAdd.map(m => ({ name: m.display_name, phone: m.phone })));
+      renderPendingGuests();
+      showToast(toAdd.length ? `${toAdd.length} member${toAdd.length !== 1 ? 's' : ''} added` : 'All members already added', 'success');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Import group members';
+    }
+  });
+
   // ── Receipt Sheet ─────────────────────────────────────────
   function showDigitalTab() {
     $('tab-digital').classList.add('active');
@@ -1051,34 +1088,56 @@
       </div>
     `);
 
-    // Venmo pay button — shown when the payer has Venmo set and the viewer isn't the payer
+    // Venmo pay button — shown to any non-payer with a share
     const myShare   = getPersonShare(user.phone, claims, items, guests, bill);
-    if (payerVenmo && user.phone !== paidByPhone && myShare > 0) {
+    if (user.phone !== paidByPhone && myShare > 0) {
       const payerName  = guests.find(g => g.phone === paidByPhone)?.name || 'the bill payer';
       const isNonUSD   = billCurrency !== 'USD';
       const venmoNote  = encodeURIComponent(bill.name);
+      const usdAmt     = isNonUSD && exchangeRate ? (myShare * exchangeRate).toFixed(2) : (!isNonUSD ? myShare.toFixed(2) : null);
 
-      if (isNonUSD && !exchangeRate) {
-        setHTML('venmo-pay-wrap', `
-          <div style="margin-top:20px;padding:16px;background:var(--surface-2);border-radius:var(--radius);text-align:center;">
-            <p style="font-size:13px;color:var(--text-muted);margin-bottom:6px;">
-              Pay <strong style="color:var(--text);">@${escHtml(payerVenmo)}</strong> (${escHtml(payerName)})
-            </p>
-            <p style="font-size:12px;color:var(--text-muted);">Exchange rate unavailable — open Venmo manually.</p>
-          </div>
-        `);
-      } else {
-        const venmoUsdAmt = isNonUSD ? (myShare * exchangeRate).toFixed(2) : myShare.toFixed(2);
-        const venmoUrl    = `venmo://paycharge?txn=pay&recipients=${encodeURIComponent(payerVenmo)}&amount=${venmoUsdAmt}&note=${venmoNote}`;
+      if (payerVenmo) {
+        if (isNonUSD && !exchangeRate) {
+          setHTML('venmo-pay-wrap', `
+            <div style="margin-top:20px;padding:16px;background:var(--surface-2);border-radius:var(--radius);text-align:center;">
+              <p style="font-size:13px;color:var(--text-muted);margin-bottom:6px;">
+                Pay <strong style="color:var(--text);">@${escHtml(payerVenmo)}</strong> (${escHtml(payerName)})
+              </p>
+              <p style="font-size:12px;color:var(--text-muted);">Exchange rate unavailable — open Venmo manually.</p>
+            </div>
+          `);
+        } else {
+          const venmoUrl = `venmo://paycharge?txn=pay&recipients=${encodeURIComponent(payerVenmo)}&amount=${usdAmt}&note=${venmoNote}`;
+          setHTML('venmo-pay-wrap', `
+            <div style="margin-top:20px;padding:16px;background:var(--surface-2);border-radius:var(--radius);text-align:center;">
+              <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">
+                Pay <strong style="color:var(--text);">@${escHtml(payerVenmo)}</strong> (${escHtml(payerName)})
+              </p>
+              <a href="${venmoUrl}" class="btn btn-primary btn-full" style="text-decoration:none;display:block;">
+                Pay ${usdAmt ? '$' + usdAmt : ''} on Venmo
+              </a>
+              <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">Opens the Venmo app with your amount pre-filled.</p>
+            </div>
+          `);
+        }
+      } else if (usdAmt) {
+        const venmoUrl = `venmo://paycharge?txn=pay&amount=${usdAmt}&note=${venmoNote}`;
         setHTML('venmo-pay-wrap', `
           <div style="margin-top:20px;padding:16px;background:var(--surface-2);border-radius:var(--radius);text-align:center;">
             <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">
-              Pay <strong style="color:var(--text);">@${escHtml(payerVenmo)}</strong> (${escHtml(payerName)})
+              Pay <strong style="color:var(--text);">${escHtml(payerName)}</strong> $${usdAmt}
             </p>
             <a href="${venmoUrl}" class="btn btn-primary btn-full" style="text-decoration:none;display:block;">
-              Pay $${venmoUsdAmt} on Venmo
+              Pay $${usdAmt} on Venmo
             </a>
-            <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">Opens the Venmo app with your amount pre-filled.</p>
+            <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">Search for ${escHtml(payerName)} in Venmo. Payer can add their @handle in Profile for one-tap payments.</p>
+          </div>
+        `);
+      } else {
+        setHTML('venmo-pay-wrap', `
+          <div style="margin-top:20px;padding:16px;background:var(--surface-2);border-radius:var(--radius);text-align:center;">
+            <p style="font-size:13px;color:var(--text-muted);">Open Venmo and pay <strong style="color:var(--text);">${escHtml(payerName)}</strong> for ${escHtml(bill.name)}.</p>
+            <p style="font-size:11px;color:var(--text-muted);margin-top:6px;">Payer can add their @handle in Profile for one-tap payments.</p>
           </div>
         `);
       }
@@ -1192,6 +1251,11 @@
     renderPendingGuests();
     $('new-guest-name').value  = '';
     $('new-guest-phone').value = '';
+    if (bill.group_id) {
+      show($('import-group-btn'));
+    } else {
+      hide($('import-group-btn'));
+    }
     if ('contacts' in navigator && navigator.contacts) {
       show($('import-contacts-btn'));
     } else {

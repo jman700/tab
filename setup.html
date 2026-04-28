@@ -55,7 +55,7 @@
       <span>JPG, PNG, HEIC supported</span>
     </label>
     <div class="photo-strip hidden" id="photo-strip"></div>
-    <img id="receipt-preview" class="upload-preview hidden" alt="Receipt" />
+    <img id="receipt-preview" class="upload-preview hidden" alt="Receipt" style="cursor:zoom-in;" onclick="openPhotoLightbox(this.src)" />
     <button class="btn btn-primary btn-full mt-8 hidden" id="scan-btn">Scan Receipt →</button>
     <button class="btn btn-secondary btn-sm mt-8 hidden" id="add-photo-btn">+ Add another photo</button>
     <div class="processing hidden" id="processing-state">
@@ -493,12 +493,23 @@
     renderPhotoStrip();
   }
 
+  function openPhotoLightbox(url) {
+    const ov  = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;';
+    const img = document.createElement('img');
+    img.src   = url;
+    img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;border-radius:4px;';
+    ov.appendChild(img);
+    ov.addEventListener('click', () => ov.remove());
+    document.body.appendChild(ov);
+  }
+
   function renderPhotoStrip() {
     const strip = $('photo-strip');
     if (photos.length === 0) { strip.classList.add('hidden'); return; }
     strip.classList.remove('hidden');
     strip.innerHTML = photos.map(p => `
-      <div class="photo-thumb ${p.scanned ? 'scanned' : ''}">
+      <div class="photo-thumb ${p.scanned ? 'scanned' : ''}" onclick="openPhotoLightbox('${p.previewUrl}')" style="cursor:zoom-in;">
         <img src="${p.previewUrl}" alt="Receipt photo" />
         ${p.scanned ? '<div class="photo-thumb-check">✓</div>' : ''}
       </div>
