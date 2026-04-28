@@ -493,6 +493,7 @@
     $$('.unlink-bill-btn').forEach(btn => {
       btn.addEventListener('click', async e => {
         e.stopPropagation();
+        if (!confirm('Remove this bill from the group? It will move back to your Bills tab.')) return;
         const bId = btn.dataset.billId;
         const { error } = await Groups.assignBillToGroup(bId, null);
         if (error) return showToast('Could not unlink bill', 'error');
