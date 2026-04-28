@@ -132,6 +132,7 @@
       <button type="button" class="toggle-btn"        data-method="percentage">%</button>
       <button type="button" class="toggle-btn"        data-method="shares">Shares</button>
       <button type="button" class="toggle-btn"        data-method="adjustment">Adjust</button>
+      <button type="button" class="toggle-btn"        data-method="claim">Claim</button>
     </div>
   </div>
 
@@ -217,6 +218,9 @@
   let members = [];
   let activeSplitMethod = 'equal';
   let balancesLoaded = false;
+  let scannedItems    = [];   // items from OCR, used by Claim split method
+  let claimsByUnit    = {};   // key: `${itemIdx}-${unitIdx}` → Set<phone>
+  let claimActivePhone = null;
 
   // ── Init ──────────────────────────────────────────────────
   async function init() {
@@ -336,7 +340,7 @@
 
   $('invite-btn').addEventListener('click', shareInvite);
   $('invite-members-btn').addEventListener('click', shareInvite);
-  $('back-btn').addEventListener('click', () => navigateTo('/dashboard.html'));
+  $('back-btn').addEventListener('click', () => navigateTo('/dashboard.html#groups'));
 
   // ── Balances tab ──────────────────────────────────────────
   async function loadBalances() {
@@ -353,7 +357,9 @@
       ]);
 
       if (e1 || e2 || e3) {
-        setHTML('balances-list', '<p style="font-size:14px;color:var(--text-muted);">Could not load balances.</p>');
+        console.error('loadBalances errors — expenses:', e1, '| bills:', e2, '| settlements:', e3);
+        const msg = (e1 || e2 || e3)?.message || (e1 || e2 || e3)?.code || 'unknown';
+        setHTML('balances-list', `<p style="font-size:14px;color:var(--text-muted);">Could not load balances: ${escHtml(msg)}</p>`);
         return;
       }
 
@@ -449,7 +455,8 @@
       const { data, error } = await Groups.getExpenses(groupId);
       if (error) {
         console.error('loadExpenses failed:', error);
-        setHTML('expenses-list', '<p style="font-size:14px;color:var(--text-muted);">Could not load expenses.</p>');
+        const msg = error?.message || error?.code || 'unknown';
+        setHTML('expenses-list', `<p style="font-size:14px;color:var(--text-muted);">Could not load expenses: ${escHtml(msg)}</p>`);
         return;
       }
       renderExpenses(data || []);
@@ -637,6 +644,11 @@
       return;
     }
 
+    if (method === 'claim') {
+      renderClaimInputs();
+      return;
+    }
+
     if (method === 'adjustment') {
       setHTML('split-inputs', included.map(m => {
         const colorIdx = members.indexOf(m);
@@ -741,6 +753,158 @@
     }
   }
 
+  function renderClaimInputs() {
+    const currency = $('exp-currency').value || 'USD';
+
+    if (scannedItems.length === 0) {
+      setHTML('split-inputs', '<p style="font-size:13px;color:var(--text-muted);padding:4px 0;">📷 Scan a receipt first to use item claiming.</p>');
+      return;
+    }
+
+    const pickerHtml = `
+      <div style="margin-bottom:12px;">
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:6px;">Claiming for</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${members.map((m, colorIdx) => {
+            const isActive = m.phone === claimActivePhone;
+            const color    = getPersonColor(colorIdx);
+            return `
+              <button type="button" class="claim-member-btn"
+                data-phone="${escHtml(m.phone)}"
+                style="display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:20px;
+                       border:2px solid ${isActive ? color : 'var(--border)'};
+                       background:${isActive ? color + '22' : 'transparent'};
+                       cursor:pointer;font-size:13px;color:var(--text);">
+                <div style="width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+                            font-size:9px;font-weight:600;background:${color}22;color:${color};">
+                  ${escHtml(getInitials(m.display_name))}
+                </div>
+                ${escHtml(m.display_name.split(' ')[0])}
+              </button>`;
+          }).join('')}
+        </div>
+      </div>`;
+
+    const itemsHtml = scannedItems.map((item, itemIdx) => {
+      const qty = parseInt(item.quantity) || 1;
+      const chips = Array.from({ length: qty }, (_, unitIdx) => {
+        const key      = `${itemIdx}-${unitIdx}`;
+        const claimers = claimsByUnit[key] ? [...claimsByUnit[key]] : [];
+        const isEmpty  = claimers.length === 0;
+        const avatars  = claimers.map(phone => {
+          const mIdx  = members.findIndex(m => m.phone === phone);
+          const color = getPersonColor(mIdx >= 0 ? mIdx : 0);
+          const m     = members[mIdx];
+          return `<div style="width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:600;background:${color}33;color:${color};border:1px solid ${color};">${escHtml(getInitials(m ? m.display_name : '?'))}</div>`;
+        }).join('');
+        const splitLabel = claimers.length > 1 ? `<span style="font-size:9px;color:var(--text-muted);margin-left:1px;">÷${claimers.length}</span>` : '';
+        return `
+          <button type="button"
+            style="display:inline-flex;align-items:center;justify-content:center;gap:1px;min-width:30px;height:30px;padding:0 4px;border-radius:6px;cursor:pointer;
+                   border:${isEmpty ? '1.5px dashed var(--border)' : '1.5px solid var(--border-strong)'};
+                   background:${isEmpty ? 'transparent' : 'var(--surface-2)'};"
+            onclick="toggleExpenseClaim(${itemIdx},${unitIdx})">
+            ${isEmpty ? '<span style="color:var(--border-strong);font-size:14px;">+</span>' : `<div style="display:flex;gap:1px;">${avatars}</div>${splitLabel}`}
+          </button>`;
+      }).join('');
+
+      return `
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(item.name)}</div>
+            <div style="font-size:11px;color:var(--text-muted);">${fmtCurrency(item.price, currency)} each</div>
+          </div>
+          <div style="display:flex;gap:3px;flex-wrap:wrap;justify-content:flex-end;">${chips}</div>
+        </div>`;
+    }).join('');
+
+    const splits   = computeClaimSplits();
+    const amount   = parseFloat($('exp-amount').value) || 0;
+    const claimedTotal = splits.reduce((s, x) => s + x.amount, 0);
+    const previewHtml = splits.length > 0
+      ? `<div style="margin-top:10px;padding:8px;background:var(--surface-2);border-radius:var(--radius-sm);">
+          ${splits.map(s => {
+            const m = members.find(x => x.phone === s.phone);
+            return `<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0;">
+              <span>${escHtml(m ? m.display_name : s.phone)}</span>
+              <span style="font-weight:500;">${fmtCurrency(s.amount, currency)}</span>
+            </div>`;
+          }).join('')}
+          <div style="font-size:11px;margin-top:4px;color:${Math.abs(claimedTotal - amount) < 0.02 ? 'var(--green)' : 'var(--text-muted)'};">
+            ${Math.abs(claimedTotal - amount) < 0.02 ? `✓ ${fmtCurrency(amount, currency)} total` : `${fmtCurrency(claimedTotal, currency)} of ${fmtCurrency(amount, currency)} claimed`}
+          </div>
+        </div>`
+      : `<p style="font-size:12px;color:var(--text-muted);margin-top:8px;">Tap items above to assign them.</p>`;
+
+    setHTML('split-inputs', pickerHtml + `<div style="margin-bottom:4px;">${itemsHtml}</div>` + previewHtml);
+
+    $$('.claim-member-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        claimActivePhone = btn.dataset.phone;
+        renderSplitInputs();
+      });
+    });
+  }
+
+  function computeClaimSplits() {
+    const amount        = parseFloat($('exp-amount').value) || 0;
+    const itemsSubtotal = scannedItems.reduce((s, it) => s + (parseFloat(it.price) || 0) * (parseInt(it.quantity) || 1), 0);
+    const tax           = Math.max(0, amount - itemsSubtotal);
+
+    const memberTotals  = {};
+    members.forEach(m => { memberTotals[m.phone] = 0; });
+
+    scannedItems.forEach((item, itemIdx) => {
+      const qty = parseInt(item.quantity) || 1;
+      for (let unitIdx = 0; unitIdx < qty; unitIdx++) {
+        const key      = `${itemIdx}-${unitIdx}`;
+        const claimers = claimsByUnit[key] ? [...claimsByUnit[key]] : [];
+        if (!claimers.length) continue;
+        const price = parseFloat(item.price) || 0;
+        claimers.forEach(phone => {
+          if (memberTotals[phone] !== undefined) memberTotals[phone] += price / claimers.length;
+        });
+      }
+    });
+
+    const totalClaimed = Object.values(memberTotals).reduce((s, v) => s + v, 0);
+    if (totalClaimed < 0.001) return [];
+
+    const splits = members
+      .filter(m => memberTotals[m.phone] > 0.001)
+      .map(m => {
+        const itemShare = memberTotals[m.phone];
+        const taxShare  = totalClaimed > 0 ? tax * (itemShare / totalClaimed) : 0;
+        return { phone: m.phone, amount: parseFloat((itemShare + taxShare).toFixed(2)) };
+      });
+
+    // Reconcile rounding to payer
+    const sum     = splits.reduce((s, x) => s + x.amount, 0);
+    const target  = parseFloat((totalClaimed + tax).toFixed(2));
+    const diff    = parseFloat((target - sum).toFixed(2));
+    if (Math.abs(diff) > 0 && splits.length > 0) {
+      const paid_by   = $('exp-paid-by').value;
+      const payerSplit = splits.find(s => s.phone === paid_by) || splits[0];
+      if (payerSplit) payerSplit.amount = parseFloat((payerSplit.amount + diff).toFixed(2));
+    }
+
+    return splits;
+  }
+
+  window.toggleExpenseClaim = function(itemIdx, unitIdx) {
+    if (!claimActivePhone) { showToast('Select a person first', 'error'); return; }
+    const key = `${itemIdx}-${unitIdx}`;
+    if (!claimsByUnit[key]) claimsByUnit[key] = new Set();
+    const set = claimsByUnit[key];
+    if (set.has(claimActivePhone)) {
+      set.delete(claimActivePhone);
+      if (set.size === 0) delete claimsByUnit[key];
+    } else {
+      set.add(claimActivePhone);
+    }
+    renderSplitInputs();
+  };
+
   $$('[data-method]').forEach(btn => {
     btn.addEventListener('click', () => {
       activeSplitMethod = btn.dataset.method;
@@ -770,6 +934,9 @@
     $('exp-scan-input').value  = '';
     $('exp-scanning-state').style.display = 'none';
     $('exp-items-preview').style.display  = 'none';
+    scannedItems     = [];
+    claimsByUnit     = {};
+    claimActivePhone = user.phone;
     renderParticipants();
     renderSplitInputs();
     openSheet('expense-backdrop', 'expense-sheet');
@@ -794,7 +961,7 @@
     if (members.length === 0) { showToast('No members to split with', 'error'); return; }
 
     const includedAtSave = getIncludedMembers();
-    if (!includedAtSave.some(m => m.phone === paid_by)) {
+    if (activeSplitMethod !== 'claim' && !includedAtSave.some(m => m.phone === paid_by)) {
       showToast('Payer must be included in the split', 'error');
       return;
     }
@@ -858,6 +1025,16 @@
         const payerSplit = splits.find(s => s.phone === paid_by) || splits[0];
         if (payerSplit) payerSplit.amount = parseFloat((payerSplit.amount + sharesDiff).toFixed(2));
       }
+    } else if (activeSplitMethod === 'claim') {
+      splits = computeClaimSplits();
+      if (splits.length === 0) {
+        showToast('No items claimed — assign items to people first', 'error');
+        return;
+      }
+      // Ensure payer appears in splits (they may not have claimed anything)
+      if (!splits.some(s => s.phone === paid_by)) {
+        splits.push({ phone: paid_by, amount: 0 });
+      }
     } else if (activeSplitMethod === 'adjustment') {
       const inputs   = [...$$('.split-adj-input')];
       const n        = includedAtSave.length;
@@ -893,7 +1070,11 @@
         splits
       );
 
-      if (error) { showToast('Could not save expense', 'error'); return; }
+      if (error) {
+        console.error('addExpense failed:', error);
+        showToast(`Could not save expense: ${error?.message || error?.code || 'unknown'}`, 'error', 5000);
+        return;
+      }
 
       closeSheet('expense-backdrop', 'expense-sheet');
       showToast('Expense added', 'success');
@@ -1190,6 +1371,13 @@
 
       const items = data.items || [];
       const tax   = parseFloat(data.tax) || 0;
+      scannedItems = items.map(it => ({
+        name:     it.name,
+        price:    parseFloat(it.price) || 0,
+        quantity: parseInt(it.quantity, 10) || 1,
+      }));
+      claimsByUnit = {};
+      if (activeSplitMethod === 'claim') renderSplitInputs();
       const total = items.reduce((s, it) => s + (parseFloat(it.price) || 0) * (parseInt(it.quantity, 10) || 1), 0) + tax;
       if (total > 0 && !$('exp-amount').value) {
         $('exp-amount').value = total.toFixed(2);

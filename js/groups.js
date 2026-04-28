@@ -266,6 +266,12 @@ const Groups = (() => {
     return {};
   }
 
+  async function assignBillToGroup(billId, groupId) {
+    const { error } = await db.from('bills').update({ group_id: groupId || null }).eq('id', billId);
+    if (error) return { error };
+    return {};
+  }
+
   return {
     createGroup,
     getMyGroups,
@@ -281,5 +287,6 @@ const Groups = (() => {
     addMember,
     closeGroup,
     deleteGroup,
+    assignBillToGroup,
   };
 })();

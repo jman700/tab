@@ -115,8 +115,91 @@ ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS currency      TEXT    DEFAULT 'US
 ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS receipt_urls  TEXT[]  DEFAULT '{}';
 ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS paid_by_phone TEXT;
 
--- Groups schema (run once if adding groups to an existing install):
--- ALTER TABLE tab.groups ADD COLUMN IF NOT EXISTS ...  (see HANDOFF.md)
+-- ── Groups ───────────────────────────────────────────────────
+-- Run this block once to add group support.
+CREATE TABLE IF NOT EXISTS tab.groups (
+  id           UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+  name         TEXT        NOT NULL,
+  created_by   TEXT        NOT NULL,
+  invite_token UUID        DEFAULT gen_random_uuid() UNIQUE NOT NULL,
+  closed_at    TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS tab.group_members (
+  id           UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+  group_id     UUID        REFERENCES tab.groups(id) ON DELETE CASCADE NOT NULL,
+  phone        TEXT        NOT NULL,
+  display_name TEXT        NOT NULL,
+  joined_at    TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(group_id, phone)
+);
+
+CREATE TABLE IF NOT EXISTS tab.expenses (
+  id           UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+  group_id     UUID        REFERENCES tab.groups(id) ON DELETE CASCADE NOT NULL,
+  description  TEXT        NOT NULL,
+  amount       NUMERIC     NOT NULL,
+  currency     TEXT        DEFAULT 'USD',
+  paid_by      TEXT        NOT NULL,
+  split_method TEXT        DEFAULT 'equal',
+  note         TEXT,
+  expense_date DATE,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS tab.expense_splits (
+  id         UUID    DEFAULT gen_random_uuid() PRIMARY KEY,
+  expense_id UUID    REFERENCES tab.expenses(id) ON DELETE CASCADE NOT NULL,
+  phone      TEXT    NOT NULL,
+  amount     NUMERIC NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tab.settlements (
+  id         UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+  group_id   UUID        REFERENCES tab.groups(id) ON DELETE CASCADE NOT NULL,
+  paid_by    TEXT        NOT NULL,
+  paid_to    TEXT        NOT NULL,
+  amount     NUMERIC     NOT NULL,
+  currency   TEXT        DEFAULT 'USD',
+  method     TEXT,
+  note       TEXT,
+  settled_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Link bills to groups
+ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS group_id UUID REFERENCES tab.groups(id) ON DELETE SET NULL;
+
+-- RLS for groups tables
+ALTER TABLE tab.groups         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tab.group_members  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tab.expenses       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tab.expense_splits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tab.settlements    ENABLE ROW LEVEL SECURITY;
+
+-- Drop first in case they already exist with wrong definition
+DROP POLICY IF EXISTS "public_all" ON tab.groups;
+DROP POLICY IF EXISTS "public_all" ON tab.group_members;
+DROP POLICY IF EXISTS "public_all" ON tab.expenses;
+DROP POLICY IF EXISTS "public_all" ON tab.expense_splits;
+DROP POLICY IF EXISTS "public_all" ON tab.settlements;
+
+CREATE POLICY "public_all" ON tab.groups         FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "public_all" ON tab.group_members  FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "public_all" ON tab.expenses       FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "public_all" ON tab.expense_splits FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "public_all" ON tab.settlements    FOR ALL USING (true) WITH CHECK (true);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_groups_created_by        ON tab.groups(created_by);
+CREATE INDEX IF NOT EXISTS idx_group_members_group_id   ON tab.group_members(group_id);
+CREATE INDEX IF NOT EXISTS idx_group_members_phone      ON tab.group_members(phone);
+CREATE INDEX IF NOT EXISTS idx_expenses_group_id        ON tab.expenses(group_id);
+CREATE INDEX IF NOT EXISTS idx_expense_splits_expense   ON tab.expense_splits(expense_id);
+CREATE INDEX IF NOT EXISTS idx_settlements_group_id     ON tab.settlements(group_id);
+CREATE INDEX IF NOT EXISTS idx_bills_group_id           ON tab.bills(group_id);
+
+-- expense_date column (if expenses table existed before this migration)
 ALTER TABLE tab.expenses ADD COLUMN IF NOT EXISTS expense_date DATE;
 
 -- Storage bucket setup:

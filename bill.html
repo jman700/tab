@@ -92,6 +92,7 @@
   <!-- Owner: close bill -->
   <div id="owner-controls" class="hidden mt-12 mb-16" style="display:flex;flex-direction:column;gap:8px;">
     <button class="btn btn-danger btn-full" id="close-bill-btn">Close Bill</button>
+    <button class="btn btn-secondary btn-full" id="move-to-group-btn">Move to Group…</button>
     <button class="btn btn-ghost btn-full" id="delete-bill-btn" style="color:var(--red);">Delete Bill</button>
   </div>
 
@@ -154,6 +155,19 @@
   <button class="btn btn-primary btn-full mt-16" id="close-summary-btn">Done</button>
 </div>
 
+<!-- Move to Group Sheet -->
+<div class="sheet-backdrop" id="move-group-backdrop" style="display:none;"></div>
+<div class="sheet" id="move-group-sheet" style="display:none;">
+  <div class="sheet-handle"></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <h2 style="margin:0;">Move to Group</h2>
+    <button class="btn btn-ghost btn-sm" id="close-move-group-btn">✕</button>
+  </div>
+  <p style="font-size:14px;color:var(--text-muted);margin-bottom:16px;">Select a group to attach this bill to. It will appear in that group's balance calculations.</p>
+  <div id="move-group-list" style="margin-bottom:16px;"></div>
+  <button class="btn btn-ghost btn-full" id="remove-from-group-btn" style="display:none;color:var(--text-muted);">Remove from current group</button>
+</div>
+
 <!-- Kiosk Overlay (pass-the-phone fullscreen picker) -->
 <div class="kiosk-overlay" id="kiosk-overlay" style="display:none;">
   <div class="kiosk-inner">
@@ -199,6 +213,7 @@
 <script src="/js/auth.js"></script>
 <script src="/js/utils.js"></script>
 <script src="/js/user-search.js"></script>
+<script src="/js/groups.js"></script>
 <script>
   const user = Auth.requireAuth();
   if (!user) throw new Error('Not authenticated');
@@ -1218,6 +1233,73 @@
       btn.textContent = 'Add to Bill';
     }
   }
+
+  // ── Move to Group ─────────────────────────────────────────
+  $('move-to-group-btn').addEventListener('click', async () => {
+    const list = $('move-group-list');
+    list.innerHTML = '<p style="font-size:14px;color:var(--text-muted);">Loading groups…</p>';
+    openSheet('move-group-backdrop', 'move-group-sheet');
+
+    const { data: groups, error } = await Groups.getMyGroups(user.phone);
+    if (error || !groups) {
+      list.innerHTML = '<p style="font-size:14px;color:var(--text-muted);">Could not load groups.</p>';
+      return;
+    }
+
+    const active = groups.filter(g => !g.closed_at);
+    if (active.length === 0) {
+      list.innerHTML = '<p style="font-size:14px;color:var(--text-muted);">No active groups. Create a group first.</p>';
+      return;
+    }
+
+    list.innerHTML = active.map(g => {
+      const isCurrent = bill.group_id === g.id;
+      return `
+        <div class="bill-card fade-up" style="cursor:pointer;${isCurrent ? 'border-color:var(--accent);' : ''}"
+             data-group-id="${escHtml(g.id)}" data-group-name="${escHtml(g.name)}">
+          <div class="bill-card-top">
+            <div class="bill-card-name">${escHtml(g.name)}</div>
+            ${isCurrent ? '<span class="badge badge-active">Current</span>' : ''}
+          </div>
+          <div class="bill-card-meta"><span>Created ${formatDateShort(g.created_at)}</span></div>
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('.bill-card').forEach(card => {
+      card.addEventListener('click', () => assignToGroup(card.dataset.groupId, card.dataset.groupName));
+    });
+
+    const removeBtn = $('remove-from-group-btn');
+    removeBtn.style.display = bill.group_id ? '' : 'none';
+  });
+
+  async function assignToGroup(groupId, groupName) {
+    const btn = $('move-to-group-btn');
+    btn.disabled = true;
+    btn.textContent = 'Moving…';
+    try {
+      const { error } = await Groups.assignBillToGroup(billId, groupId);
+      if (error) { showToast(`Could not move bill: ${error.message || error.code || ''}`, 'error'); return; }
+      bill = { ...bill, group_id: groupId };
+      closeSheet('move-group-backdrop', 'move-group-sheet');
+      showToast(`Bill moved to "${groupName}"`, 'success');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Move to Group…';
+    }
+  }
+
+  $('remove-from-group-btn').addEventListener('click', async () => {
+    if (!bill.group_id) return;
+    const { error } = await Groups.assignBillToGroup(billId, null);
+    if (error) { showToast('Could not remove from group', 'error'); return; }
+    bill = { ...bill, group_id: null };
+    closeSheet('move-group-backdrop', 'move-group-sheet');
+    showToast('Removed from group', 'success');
+  });
+
+  $('close-move-group-btn').addEventListener('click', () => closeSheet('move-group-backdrop', 'move-group-sheet'));
+  $('move-group-backdrop').addEventListener('click',  () => closeSheet('move-group-backdrop', 'move-group-sheet'));
 
   init();
 </script>
