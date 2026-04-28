@@ -1,25 +1,24 @@
 // ============================================================
 // TAB — User Search
-// Live name-search autocomplete for any name+phone input pair.
-// Depends on: global `db` (Supabase, tab schema), Auth.formatPhone
+// Live name-search and phone-reverse-lookup autocomplete.
+// Depends on: global `db` (Supabase, tab schema), Auth
 // Usage: attachUserSearch(nameInputEl, phoneInputEl)
 // ============================================================
 
 function attachUserSearch(nameInput, phoneInput) {
-  let dropdown     = null;
+  let dropdown      = null;
   let debounceTimer = null;
-  let searchGen    = 0;
+  let searchGen     = 0;
 
   function removeDropdown() {
     if (dropdown) { dropdown.remove(); dropdown = null; }
   }
 
-  function showDropdown(results) {
+  function showDropdown(results, anchorEl) {
     removeDropdown();
     if (!results.length) return;
 
-    // Anchor dropdown to the name input's parent (needs position:relative)
-    const anchor = nameInput.parentElement;
+    const anchor = anchorEl.parentElement;
     anchor.style.position = 'relative';
 
     dropdown = document.createElement('div');
@@ -32,14 +31,11 @@ function attachUserSearch(nameInput, phoneInput) {
         `<div class="user-search-name">${escHtml(u.name)}</div>` +
         `<div class="user-search-phone">${escHtml(Auth.formatPhone(u.phone))}</div>`;
 
-      // mousedown fires before blur, so the click registers before the
-      // name input loses focus and the dropdown would otherwise close.
       item.addEventListener('mousedown', e => {
         e.preventDefault();
         nameInput.value  = u.name;
         phoneInput.value = Auth.formatPhone(u.phone);
         removeDropdown();
-        // Trigger the phone formatter if one is attached
         phoneInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
       });
 
@@ -49,7 +45,7 @@ function attachUserSearch(nameInput, phoneInput) {
     anchor.appendChild(dropdown);
   }
 
-  async function search(query) {
+  async function searchByName(query) {
     const gen = ++searchGen;
     const { data, error } = await db
       .from('users')
@@ -58,20 +54,42 @@ function attachUserSearch(nameInput, phoneInput) {
       .order('name')
       .limit(5);
     if (gen !== searchGen || error || !data) return;
-    showDropdown(data);
+    showDropdown(data, nameInput);
   }
 
+  async function searchByPhone(raw) {
+    const phone = Auth.normalizePhone(raw);
+    if (!phone) return;
+    const gen = ++searchGen;
+    const { data, error } = await db
+      .from('users')
+      .select('name, phone')
+      .eq('phone', phone)
+      .limit(1);
+    if (gen !== searchGen || error || !data?.length) return;
+    // Don't show dropdown if name is already filled with the matched name
+    if (nameInput.value.trim() === data[0].name) return;
+    showDropdown(data, phoneInput);
+  }
+
+  // Name field: search by name
   nameInput.addEventListener('input', () => {
     clearTimeout(debounceTimer);
     const q = nameInput.value.trim();
     if (q.length < 2) { removeDropdown(); return; }
-    debounceTimer = setTimeout(() => search(q), 300);
+    debounceTimer = setTimeout(() => searchByName(q), 300);
   });
 
-  // Delay on blur so mousedown on a result fires first
-  nameInput.addEventListener('blur', () => setTimeout(removeDropdown, 160));
-
-  nameInput.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { removeDropdown(); }
+  // Phone field: reverse lookup by phone number
+  phoneInput.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    const digits = phoneInput.value.replace(/\D/g, '');
+    if (digits.length < 10) { removeDropdown(); return; }
+    debounceTimer = setTimeout(() => searchByPhone(phoneInput.value), 400);
   });
+
+  nameInput.addEventListener('blur',  () => setTimeout(removeDropdown, 160));
+  phoneInput.addEventListener('blur', () => setTimeout(removeDropdown, 160));
+  nameInput.addEventListener('keydown',  e => { if (e.key === 'Escape') removeDropdown(); });
+  phoneInput.addEventListener('keydown', e => { if (e.key === 'Escape') removeDropdown(); });
 }

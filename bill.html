@@ -199,8 +199,15 @@
   </div>
 
   <button class="btn btn-secondary btn-full mb-8 hidden" id="import-group-btn">
-    Import group members
+    Select from group members
   </button>
+  <div id="group-member-picker" style="display:none;margin-bottom:12px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">
+    <div id="group-member-picker-list" style="max-height:200px;overflow-y:auto;"></div>
+    <div style="display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--border);background:var(--surface-2);">
+      <button class="btn btn-primary btn-sm" id="confirm-group-pick-btn" style="flex:1;">Add Selected</button>
+      <button class="btn btn-ghost btn-sm" id="cancel-group-pick-btn" style="flex:1;">Cancel</button>
+    </div>
+  </div>
   <button class="btn btn-secondary btn-full mb-12 hidden" id="import-contacts-btn">
     Import from Contacts
   </button>
@@ -740,18 +747,6 @@
   // User search autocomplete for Add Guests sheet
   attachUserSearch($('new-guest-name'), $('new-guest-phone'));
 
-  // Phone → name lookup: if user types a phone first and there's a match, auto-fill name
-  $('new-guest-phone').addEventListener('blur', async () => {
-    if ($('new-guest-name').value.trim()) return;
-    const phone = Auth.normalizePhone($('new-guest-phone').value.trim());
-    if (!phone) return;
-    const { data: u } = await db.from('users').select('name').eq('phone', phone).maybeSingle();
-    if (u?.name) {
-      $('new-guest-name').value = u.name;
-      showToast(`Found: ${u.name}`, 'success');
-    }
-  });
-
   $('import-group-btn').addEventListener('click', async () => {
     const btn = $('import-group-btn');
     btn.disabled = true;
@@ -764,14 +759,40 @@
         ...pendingGuests.map(g => g.phone),
         user.phone,
       ].filter(Boolean));
-      const toAdd = groupMembers.filter(m => m.phone && !existingPhones.has(m.phone));
-      pendingGuests.push(...toAdd.map(m => ({ name: m.display_name, phone: m.phone })));
-      renderPendingGuests();
-      showToast(toAdd.length ? `${toAdd.length} member${toAdd.length !== 1 ? 's' : ''} added` : 'All members already added', 'success');
+      const eligible = groupMembers.filter(m => m.phone && !existingPhones.has(m.phone));
+      if (eligible.length === 0) {
+        showToast('All group members are already on the bill', 'success');
+        return;
+      }
+      setHTML('group-member-picker-list', eligible.map(m => `
+        <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;border-bottom:1px solid var(--border);">
+          <input type="checkbox" class="group-pick-cb" data-name="${escHtml(m.display_name)}" data-phone="${escHtml(m.phone)}" checked style="width:16px;height:16px;flex-shrink:0;" />
+          <div>
+            <div style="font-size:14px;font-weight:500;">${escHtml(m.display_name)}</div>
+            <div style="font-size:12px;color:var(--text-muted);">${escHtml(Auth.formatPhone(m.phone))}</div>
+          </div>
+        </label>
+      `).join(''));
+      hide(btn);
+      $('group-member-picker').style.display = '';
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Import group members';
+      btn.textContent = 'Select from group members';
     }
+  });
+
+  $('confirm-group-pick-btn').addEventListener('click', () => {
+    const checked = [...$$('#group-member-picker-list .group-pick-cb:checked')];
+    checked.forEach(cb => pendingGuests.push({ name: cb.dataset.name, phone: cb.dataset.phone }));
+    $('group-member-picker').style.display = 'none';
+    show($('import-group-btn'));
+    renderPendingGuests();
+    if (checked.length) showToast(`${checked.length} member${checked.length !== 1 ? 's' : ''} added`, 'success');
+  });
+
+  $('cancel-group-pick-btn').addEventListener('click', () => {
+    $('group-member-picker').style.display = 'none';
+    show($('import-group-btn'));
   });
 
   // ── Receipt Sheet ─────────────────────────────────────────
