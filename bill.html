@@ -978,8 +978,6 @@
 
     setHTML('summary-list', summaryList);
 
-    const tip = subtotal * (bill.tip_percentage / 100);
-
     const dualAmt = amount => {
       if (!showDual) return display(amount);
       const local = fmtCurrency(amount, billCurrency);
