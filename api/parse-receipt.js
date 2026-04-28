@@ -2,7 +2,7 @@
 // TAB — Receipt OCR Serverless Function
 // POST /api/parse-receipt
 // Body: { image: base64string, mediaType: "image/jpeg" }
-// Returns: { restaurant, items: [{name, price, quantity, note}], tax, tax_included, date }
+// Returns: { restaurant, items: [{name, price, quantity, note}], taxes: [{label, amount}], tax, tax_included, date }
 // ============================================================
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -34,7 +34,9 @@ Return ONLY a valid JSON object — no markdown, no code fences, no explanation.
       "note":     "modifier or description, or null"
     }
   ],
-  "tax":          3.50,
+  "taxes": [
+    { "label": "Tax", "amount": 3.50 }
+  ],
   "tax_included": false,
   "date":         "2024-03-15"
 }
@@ -45,7 +47,9 @@ Rules:
 - "quantity" is the number of units ordered
 - "tax_included" is true only if tax is already baked into item prices (no separate tax line on the receipt)
 - "date" is the date printed on the receipt in YYYY-MM-DD format, or null if not visible or not a date you're confident about
-- If there is a separate tax/IVA/VAT line, set tax_included to false and put the tax amount in "tax"
+- "taxes" is an array of all separate tax/fee lines on the receipt (Tax, IVA, VAT, Service Fee, etc.). Each entry has a "label" (as printed) and "amount". If no separate tax lines, use an empty array [].
+- If tax_included is true, set "taxes" to [].
+- Use separate entries in "taxes" for distinct tax lines (e.g. food tax + alcohol tax = two entries).
 - Do NOT include items with $0 price (complimentary items, service charges listed as $0)
 - Do NOT include tip/gratuity as an item
 - If you cannot confidently read a price, make your best estimate
@@ -123,10 +127,18 @@ export default async function handler(req, res) {
     const validCurrencies = ['USD','EUR','GBP','JPY','CAD','AUD','MXN','BRL','INR','CNY','KRW','SGD','HKD','CHF','NOK','SEK','NZD','ZAR','AED','THB','MYR','PHP','IDR','COP','CLP','PEN','ARS'];
     const detectedCurrency = String(parsed.currency || 'USD').toUpperCase().trim();
 
+    const taxes = (Array.isArray(parsed.taxes) ? parsed.taxes : [])
+      .map(t => ({ label: String(t.label || 'Tax').trim(), amount: Math.max(0, parseFloat(t.amount) || 0) }))
+      .filter(t => t.amount > 0);
+
+    // Keep scalar `tax` for backward compat — sum of all tax lines
+    const taxTotal = taxes.reduce((s, t) => s + t.amount, 0);
+
     const sanitized = {
       restaurant:   parsed.restaurant || null,
       currency:     validCurrencies.includes(detectedCurrency) ? detectedCurrency : 'USD',
-      tax:          parseFloat(parsed.tax)     || 0,
+      taxes,
+      tax:          taxTotal,
       tax_included: Boolean(parsed.tax_included),
       date: (parsed.date && /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.date)))
         ? String(parsed.date)

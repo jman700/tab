@@ -202,6 +202,11 @@ CREATE INDEX IF NOT EXISTS idx_bills_group_id           ON tab.bills(group_id);
 -- expense_date column (if expenses table existed before this migration)
 ALTER TABLE tab.expenses ADD COLUMN IF NOT EXISTS expense_date DATE;
 
+-- ── Discounts & multi-tax (migration) ────────────────────────
+ALTER TABLE tab.bills  ADD COLUMN IF NOT EXISTS discount_amount NUMERIC DEFAULT 0;
+ALTER TABLE tab.bills  ADD COLUMN IF NOT EXISTS tax_items       JSONB   DEFAULT '[]';
+ALTER TABLE tab.items  ADD COLUMN IF NOT EXISTS discount        NUMERIC DEFAULT 0;
+
 -- Storage bucket setup:
 -- 1. Create a bucket named "receipts" and set it to Public (allows public reads).
 -- 2. Run these policies so the anon key can upload from the browser:

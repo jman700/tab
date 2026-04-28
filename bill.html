@@ -477,7 +477,8 @@
         const isMine     = unitClaims.some(c => c.guest_phone === activePhone);
 
         if (isEmpty) unclaimedCount++;
-        if (isMine)  myItemShare += item.price / unitClaims.length;
+        const effectivePrice = item.price - (item.discount || 0);
+        if (isMine)  myItemShare += effectivePrice / unitClaims.length;
 
 
         const avatars = unitClaims.map(c => {
@@ -523,7 +524,9 @@
               ${noteHtml}
             </div>
             <div class="item-claim-price">
-              ${display(item.price)} <span>/ each</span>
+              ${(item.discount || 0) > 0
+                ? `<span style="text-decoration:line-through;color:var(--text-muted);font-size:12px;">${display(item.price)}</span> ${display(item.price - item.discount)}`
+                : display(item.price)} <span>/ each</span>
             </div>
           </div>
           <div class="claim-chips">${chips}</div>
@@ -784,13 +787,16 @@
   });
 
   function buildReceiptCanvas() {
-    const converting = showConverted && exchangeRate;
-    const currency   = converting ? 'USD' : (bill.currency || 'USD');
-    const conv       = n => converting ? (n || 0) * exchangeRate : (n || 0);
-    const subtotal   = items.reduce((s, i) => s + i.price * i.quantity, 0);
-    const tax        = bill.tax_included ? 0 : (bill.tax_amount || 0);
-    const tip        = subtotal * ((bill.tip_percentage || 0) / 100);
-    const money      = n => fmtCurrency(conv(n), currency);
+    const converting  = showConverted && exchangeRate;
+    const currency    = converting ? 'USD' : (bill.currency || 'USD');
+    const conv        = n => converting ? (n || 0) * exchangeRate : (n || 0);
+    const subtotal    = items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const itemDiscSum = items.reduce((s, i) => s + (i.discount || 0) * i.quantity, 0);
+    const billDisc    = bill.discount_amount || 0;
+    const taxLines    = getBillTaxLines(bill);
+    const totalTax    = taxLines.reduce((s, t) => s + t.amount, 0);
+    const tip         = subtotal * ((bill.tip_percentage || 0) / 100);
+    const money       = n => fmtCurrency(conv(n), currency);
 
     const W   = 360;
     const P   = 24;
@@ -802,10 +808,12 @@
     h += 28 + 12 + 2 + 12;
     h += 20 + 18 + 12 + 2 + 12;
     h += 16 + 8 + 1 + 8;
-    items.forEach(item => { h += 22; if (item.note) h += 16; });
+    items.forEach(item => { h += 22; if (item.note) h += 16; if ((item.discount || 0) > 0) h += 16; });
     h += 8 + 1 + 12;
     h += 20;
-    if (tax > 0) h += 20;
+    if (itemDiscSum > 0) h += 20;
+    if (billDisc > 0) h += 20;
+    taxLines.forEach(() => { h += 20; });
     if (tip > 0) h += 20;
     h += 10 + 2 + 8 + 26 + 2 + 16;
     if (currency !== 'USD') h += 16;
@@ -866,12 +874,17 @@
     // Items
     const nFont = mono(11), nMaxW = IW * 0.58;
     items.forEach(item => {
+      const lineAmt = (item.price - (item.discount || 0)) * item.quantity;
       draw(trunc(item.name, nMaxW, nFont), P,             y + 15, nFont,    INK);
       draw(String(item.quantity),          P + IW * 0.70, y + 15, mono(11), INK, 'right');
-      draw(money(item.price * item.quantity), W - P,      y + 15, mono(11), INK, 'right');
+      draw(money(lineAmt),                 W - P,         y + 15, mono(11), INK, 'right');
       y += 22;
       if (item.note) {
         draw(trunc(`  ${item.note}`, IW * 0.88, mono(9)), P, y + 12, mono(9), MUTED);
+        y += 16;
+      }
+      if ((item.discount || 0) > 0) {
+        draw(`  −${money(item.discount)} disc`, P, y + 12, mono(9), MUTED);
         y += 16;
       }
     });
@@ -879,16 +892,18 @@
     y += 8; thinLine(y); y += 1 + 12;
 
     // Subtotals
-    const totRow = (label, val, y_) => {
-      draw(label,     P,     y_ + 14, mono(11), MUTED);
-      draw(money(val), W - P, y_ + 14, mono(11), INK, 'right');
+    const totRow = (label, val, y_, color = INK) => {
+      draw(label,      P,     y_ + 14, mono(11), MUTED);
+      draw(money(val), W - P, y_ + 14, mono(11), color, 'right');
     };
     totRow('Subtotal', subtotal, y); y += 20;
-    if (tax > 0) { totRow('Tax', tax, y); y += 20; }
+    if (itemDiscSum > 0) { totRow('Item discounts', -itemDiscSum, y, MUTED); y += 20; }
+    if (billDisc > 0)    { totRow('Discount',       -billDisc,    y, MUTED); y += 20; }
+    taxLines.forEach(t => { totRow(t.label, t.amount, y); y += 20; });
     if (tip > 0) { totRow(`Tip (${bill.tip_percentage}%)`, tip, y); y += 20; }
 
     y += 10; thickLine(y); y += 2 + 8;
-    const canvasTotal = subtotal + tax + tip;
+    const canvasTotal = subtotal - itemDiscSum - billDisc + totalTax + tip;
     draw('TOTAL',                    P,     y + 20, sans(14, true), ACCENT);
     draw(fmtCurrency(conv(canvasTotal), currency), W - P, y + 20, sans(14, true), ACCENT, 'right');
     y += 26;
@@ -935,10 +950,18 @@
   $('summary-backdrop').addEventListener('click',  () => closeSheet('summary-backdrop', 'summary-sheet'));
 
   function renderSummary() {
-    const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
-    const tax      = bill.tax_included ? 0 : (bill.tax_amount || 0);
-    const tip      = subtotal * ((bill.tip_percentage || 0) / 100);
-    const computed = subtotal + tax + tip;
+    const subtotal    = items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const itemDiscSum = items.reduce((s, i) => s + (i.discount || 0) * i.quantity, 0);
+    const billDisc    = bill.discount_amount || 0;
+    const taxLines    = getBillTaxLines(bill);
+    const totalTax    = taxLines.reduce((s, t) => s + t.amount, 0);
+    const tip         = subtotal * ((bill.tip_percentage || 0) / 100);
+    const computed    = subtotal - itemDiscSum - billDisc + totalTax + tip;
+
+    // All-claimed check
+    const totalUnits   = items.reduce((s, i) => s + i.quantity, 0);
+    const claimedSlots = new Set(claims.map(c => `${c.item_id}-${c.unit_index}`)).size;
+    const allClaimed   = totalUnits > 0 && claimedSlots >= totalUnits;
 
     const metaTotal = (billCurrency !== 'USD' && exchangeRate)
       ? fmtCurrency(computed * exchangeRate, 'USD')
@@ -985,9 +1008,23 @@
       return `${usd} <span style="font-size:10px;color:var(--text-muted);">(${local})</span>`;
     };
 
+    const allClaimedBanner = allClaimed && isOwner
+      ? `<div style="background:#1a472a;border:1px solid #2d6a4f;border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
+           <span style="font-size:18px;">✓</span>
+           <div>
+             <div style="font-size:13px;font-weight:600;color:#74c69d;">All items claimed</div>
+             <div style="font-size:12px;color:#52b788;">Every item on this bill has been claimed.</div>
+           </div>
+         </div>`
+      : '';
+
     setHTML('summary-totals', `
+      ${allClaimedBanner}
       <div class="summary-total-row"><span class="key">Subtotal</span><span>${dualAmt(subtotal)}</span></div>
-      ${tax > 0 ? `<div class="summary-total-row"><span class="key">Tax</span><span>${dualAmt(tax)}</span></div>` : ''}
+      ${itemDiscSum > 0 ? `<div class="summary-total-row" style="color:var(--text-muted);"><span class="key">Item discounts</span><span>−${dualAmt(itemDiscSum)}</span></div>` : ''}
+      ${billDisc > 0 ? `<div class="summary-total-row" style="color:var(--text-muted);"><span class="key">Discount</span><span>−${dualAmt(billDisc)}</span></div>` : ''}
+      ${taxLines.map(t => `<div class="summary-total-row"><span class="key">${escHtml(t.label)}</span><span>${dualAmt(t.amount)}</span></div>`).join('')}
+      ${bill.tax_included ? `<div class="summary-total-row" style="color:var(--text-muted);font-size:12px;"><span class="key">Tax</span><span>included</span></div>` : ''}
       ${tip > 0 ? `<div class="summary-total-row"><span class="key">Tip (${bill.tip_percentage}%)</span><span>${dualAmt(tip)}</span></div>` : ''}
       <div class="summary-final">
         <span class="key">Total</span>

@@ -84,24 +84,29 @@
 
   <!-- Step 4: Tax -->
   <div class="setup-section hidden" id="tax-section">
-    <h3><span class="step-num">4</span> Tax</h3>
-    <div class="flex-between">
-      <div class="field" style="flex:1;">
-        <label for="tax-input">Tax Amount</label>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style="color:var(--text-muted);font-size:16px;">$</span>
-          <input class="input" id="tax-input" type="number" min="0" step="0.01" placeholder="0.00" style="max-width:120px;" />
-        </div>
-      </div>
-      <div style="font-size:13px;color:var(--text-muted);text-align:right;line-height:1.4;" id="tax-note">
-        Auto-detected from receipt
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <h3 style="margin:0;"><span class="step-num">4</span> Tax</h3>
+      <button class="btn btn-secondary btn-sm" id="add-tax-btn">+ Add Rate</button>
+    </div>
+    <div id="tax-rows-list"></div>
+    <p class="text-muted mt-4" style="font-size:12px;" id="tax-note"></p>
+  </div>
+
+  <!-- Step 5: Discount -->
+  <div class="setup-section hidden" id="discount-section">
+    <h3><span class="step-num">5</span> Discount</h3>
+    <div class="field">
+      <label for="discount-input">Whole-bill discount <span style="font-weight:400;font-size:11px;">(coupon, comp, etc.)</span></label>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="color:var(--text-muted);font-size:16px;">$</span>
+        <input class="input" id="discount-input" type="number" min="0" step="0.01" placeholder="0.00" style="max-width:140px;" />
       </div>
     </div>
   </div>
 
-  <!-- Step 5: Tip -->
+  <!-- Step 6: Tip -->
   <div class="setup-section hidden" id="tip-section">
-    <h3><span class="step-num">5</span> Tip</h3>
+    <h3><span class="step-num">6</span> Tip</h3>
     <div class="tip-presets" id="tip-presets">
       <button class="tip-btn" data-val="15">15%</button>
       <button class="tip-btn" data-val="18">18%</button>
@@ -134,9 +139,10 @@
       <span class="label">Subtotal</span>
       <span id="t-subtotal">—</span>
     </div>
-    <div class="total-row">
-      <span class="label">Tax</span>
-      <span id="t-tax">—</span>
+    <div id="t-tax-rows"></div>
+    <div class="total-row hidden" id="t-discount-row">
+      <span class="label">Discount</span>
+      <span id="t-discount">—</span>
     </div>
     <div class="total-row">
       <span class="label">Tip (<span id="t-tip-label">0%</span>)</span>
@@ -179,8 +185,9 @@
   let tipIsFixed          = false;
   let tipFixedAmt         = 0;
   let tipSplitType        = 'proportional';
-  let taxAmount           = 0;
+  let taxRows             = []; // [{label, amount}]
   let taxIncluded         = false;
+  let discountAmount      = 0;
   let isEditMode          = false;
   let currencyCode        = 'USD';
 
@@ -228,13 +235,24 @@
     $('bill-name').value = bill.name;
     tipPct               = bill.tip_percentage || 20;
     tipSplitType         = bill.tip_split_type || 'proportional';
-    taxAmount            = bill.tax_amount || 0;
+    taxIncluded          = bill.tax_included || false;
+    discountAmount       = bill.discount_amount || 0;
+
+    // Load tax rows: prefer tax_items JSONB, fall back to scalar tax_amount
+    if (Array.isArray(bill.tax_items) && bill.tax_items.length > 0) {
+      taxRows = bill.tax_items.map(t => ({ label: t.label || 'Tax', amount: toNum(t.amount) }));
+    } else if (bill.tax_amount > 0 && !bill.tax_included) {
+      taxRows = [{ label: 'Tax', amount: bill.tax_amount }];
+    } else {
+      taxRows = [];
+    }
 
     const { data: dbItems } = await db.from('items').select('*').eq('bill_id', id).order('position');
-    items = (dbItems || []).map(i => ({ ...i, tempId: i.id }));
+    items = (dbItems || []).map(i => ({ ...i, tempId: i.id, discount: toNum(i.discount) }));
 
-    $('tax-input').value = taxAmount;
+    $('discount-input').value = discountAmount > 0 ? discountAmount.toFixed(2) : '';
     setActiveTipBtn(tipPct);
+    renderTaxRows();
     renderItems();
     showPostUploadSections();
     updateTotals();
@@ -274,8 +292,14 @@
 
     $('add-item-btn').addEventListener('click', addBlankItem);
 
-    $('tax-input').addEventListener('input', debounce(() => {
-      taxAmount = toNum($('tax-input').value);
+    $('add-tax-btn').addEventListener('click', () => {
+      taxRows.push({ label: 'Tax', amount: 0 });
+      renderTaxRows();
+      updateTotals();
+    });
+
+    $('discount-input').addEventListener('input', debounce(() => {
+      discountAmount = toNum($('discount-input').value);
       updateTotals();
     }, 300));
 
@@ -425,12 +449,21 @@
           currencyCode = data.currency;
           $('currency-select').value = currencyCode;
         }
-        taxAmount   = toNum(data.tax) || 0;
         taxIncluded = data.tax_included || false;
-        $('tax-input').value = taxAmount.toFixed(2);
-        $('tax-note').textContent = taxIncluded
-          ? 'Tax is included in item prices above.'
-          : 'Tax shown separately on receipt.';
+        if (taxIncluded) {
+          taxRows = [];
+          setText('tax-note', 'Tax is included in item prices above.');
+        } else if (Array.isArray(data.taxes) && data.taxes.length > 0) {
+          taxRows = data.taxes.map(t => ({ label: t.label || 'Tax', amount: toNum(t.amount) }));
+          setText('tax-note', 'Tax lines detected from receipt.');
+        } else if (data.tax > 0) {
+          taxRows = [{ label: 'Tax', amount: toNum(data.tax) }];
+          setText('tax-note', 'Tax detected from receipt.');
+        } else {
+          taxRows = [];
+          setText('tax-note', '');
+        }
+        renderTaxRows();
       }
 
       // Merge items from this photo into the running list
@@ -440,6 +473,7 @@
         price:    toNum(item.price),
         quantity: toNum(item.quantity, 1),
         note:     item.note     || '',
+        discount: 0,
         position: items.length + i,
       }));
       items = [...items, ...newItems];
@@ -467,6 +501,36 @@
     }
   }
 
+  // ── Tax rows ──────────────────────────────────────────────
+  function renderTaxRows() {
+    const list = $('tax-rows-list');
+    list.innerHTML = '';
+    if (taxRows.length === 0) {
+      list.innerHTML = '<p style="font-size:13px;color:var(--text-muted);margin:0;">No separate tax. <button class="btn btn-ghost btn-sm" id="add-first-tax-btn" style="padding:2px 6px;">+ Add tax</button></p>';
+      const btn = list.querySelector('#add-first-tax-btn');
+      if (btn) btn.addEventListener('click', () => {
+        taxRows.push({ label: 'Tax', amount: 0 });
+        renderTaxRows();
+        updateTotals();
+      });
+      return;
+    }
+    taxRows.forEach((row, idx) => {
+      const div = document.createElement('div');
+      div.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;';
+      div.innerHTML = `
+        <input class="input tax-label-input" type="text" value="${escHtml(row.label)}" placeholder="Tax label" style="flex:1;" />
+        <span style="color:var(--text-muted);">$</span>
+        <input class="input tax-amount-input" type="number" min="0" step="0.01" value="${row.amount > 0 ? row.amount.toFixed(2) : ''}" placeholder="0.00" style="max-width:110px;text-align:right;" />
+        <button class="item-delete tax-row-del" title="Remove">&times;</button>
+      `;
+      div.querySelector('.tax-label-input').addEventListener('input', e => { taxRows[idx].label = e.target.value; });
+      div.querySelector('.tax-amount-input').addEventListener('input', debounce(e => { taxRows[idx].amount = toNum(e.target.value); updateTotals(); }, 300));
+      div.querySelector('.tax-row-del').addEventListener('click', () => { taxRows.splice(idx, 1); renderTaxRows(); updateTotals(); });
+      list.appendChild(div);
+    });
+  }
+
   // ── Items ─────────────────────────────────────────────────
   function renderItems() {
     const table  = $('items-table');
@@ -475,6 +539,7 @@
     if (header) table.appendChild(header.cloneNode(true));
 
     items.forEach((item, idx) => {
+      const disc = item.discount || 0;
       const row = document.createElement('div');
       row.className   = 'item-row';
       row.dataset.idx = idx;
@@ -482,6 +547,10 @@
         <div>
           <input class="input item-name"  type="text"   value="${escHtml(item.name)}"         placeholder="Item name" />
           <input class="input item-note mt-4" type="text" value="${escHtml(item.note || '')}" placeholder="Note (optional)" style="font-size:12px;" />
+          <div style="display:flex;align-items:center;gap:4px;margin-top:4px;">
+            <span style="font-size:11px;color:var(--text-muted);white-space:nowrap;">-disc $</span>
+            <input class="input item-disc" type="number" min="0" step="0.01" value="${disc > 0 ? disc.toFixed(2) : ''}" placeholder="0.00" style="font-size:12px;max-width:72px;text-align:right;" />
+          </div>
         </div>
         <input class="input item-qty"   type="number" min="1"      value="${item.quantity}"              style="text-align:center;" />
         <input class="input item-price" type="number" min="0" step="0.01" value="${item.price.toFixed(2)}" style="text-align:right;" />
@@ -489,16 +558,17 @@
       `;
       table.appendChild(row);
 
-      row.querySelector('.item-name').addEventListener('input',  e => { items[idx].name  = e.target.value; });
-      row.querySelector('.item-note').addEventListener('input',  e => { items[idx].note  = e.target.value; });
-      row.querySelector('.item-qty').addEventListener('input',   e => { items[idx].quantity = toNum(e.target.value, 1); updateTotals(); });
-      row.querySelector('.item-price').addEventListener('input', e => { items[idx].price    = toNum(e.target.value);    updateTotals(); });
+      row.querySelector('.item-name').addEventListener('input',  e => { items[idx].name     = e.target.value; });
+      row.querySelector('.item-note').addEventListener('input',  e => { items[idx].note     = e.target.value; });
+      row.querySelector('.item-disc').addEventListener('input',  e => { items[idx].discount = toNum(e.target.value); updateTotals(); });
+      row.querySelector('.item-qty').addEventListener('input',   e => { items[idx].quantity  = toNum(e.target.value, 1); updateTotals(); });
+      row.querySelector('.item-price').addEventListener('input', e => { items[idx].price     = toNum(e.target.value);    updateTotals(); });
       row.querySelector('.item-delete').addEventListener('click', () => { items.splice(idx, 1); renderItems(); updateTotals(); });
     });
   }
 
   function addBlankItem() {
-    items.push({ tempId: `tmp_new_${Date.now()}`, name: '', price: 0, quantity: 1, note: '', position: items.length });
+    items.push({ tempId: `tmp_new_${Date.now()}`, name: '', price: 0, quantity: 1, note: '', discount: 0, position: items.length });
     renderItems();
     updateTotals();
     const rows = $$('.item-row:not(.header-row)');
@@ -511,21 +581,55 @@
     return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   }
 
+  function getEffectiveSubtotal() {
+    return items.reduce((sum, item) => sum + (item.price - (item.discount || 0)) * item.quantity, 0);
+  }
+
+  function getTaxTotal() {
+    if (taxIncluded) return 0;
+    return taxRows.reduce((s, r) => s + (r.amount || 0), 0);
+  }
+
   function updateTotals() {
-    const subtotal = getSubtotal();
-    const tax      = taxIncluded ? 0 : taxAmount;
-    const tip      = tipIsFixed ? tipFixedAmt : subtotal * (tipPct / 100);
-    const grand    = subtotal + tax + tip;
+    const subtotal  = getSubtotal();
+    const effSub    = getEffectiveSubtotal();
+    const itemDiscs = subtotal - effSub; // sum of per-item discounts
+    const totalDisc = discountAmount + itemDiscs;
+    const taxTotal  = getTaxTotal();
+    const tip       = tipIsFixed ? tipFixedAmt : subtotal * (tipPct / 100);
+    const grand     = effSub - discountAmount + taxTotal + tip;
 
     const tipLabel = tipIsFixed
       ? fmtCurrency(tipFixedAmt, currencyCode) + ' fixed'
       : `${tipPct}%`;
 
     setText('t-subtotal',  fmtCurrency(subtotal, currencyCode));
-    setText('t-tax',       fmtCurrency(tax,      currencyCode));
+
+    // Multi-tax rows in totals panel
+    const taxRowsEl = $('t-tax-rows');
+    if (taxTotal > 0 && !taxIncluded) {
+      taxRowsEl.innerHTML = taxRows
+        .filter(r => r.amount > 0)
+        .map(r => `<div class="total-row"><span class="label">${escHtml(r.label)}</span><span>${fmtCurrency(r.amount, currencyCode)}</span></div>`)
+        .join('');
+    } else if (taxIncluded) {
+      taxRowsEl.innerHTML = '<div class="total-row"><span class="label" style="color:var(--text-muted);font-size:12px;">Tax included in prices</span><span></span></div>';
+    } else {
+      taxRowsEl.innerHTML = '';
+    }
+
+    // Discount row
+    const discRow = $('t-discount-row');
+    if (totalDisc > 0) {
+      discRow.classList.remove('hidden');
+      setText('t-discount', `−${fmtCurrency(totalDisc, currencyCode)}`);
+    } else {
+      discRow.classList.add('hidden');
+    }
+
     setText('t-tip-label', tipLabel);
-    setText('t-tip',       fmtCurrency(tip,      currencyCode));
-    setText('t-total',     fmtCurrency(grand,    currencyCode));
+    setText('t-tip',       fmtCurrency(tip,   currencyCode));
+    setText('t-total',     fmtCurrency(grand,  currencyCode));
   }
 
   function setActiveTipBtn(pct) {
@@ -540,8 +644,9 @@
   }
 
   function showPostUploadSections() {
-    ['items-section', 'tax-section', 'tip-section', 'totals-panel', 'publish-btn']
+    ['items-section', 'tax-section', 'discount-section', 'tip-section', 'totals-panel', 'publish-btn']
       .forEach(id => show($(id)));
+    renderTaxRows();
   }
 
   // ── Helpers ───────────────────────────────────────────────
@@ -564,10 +669,11 @@
 
     try {
       const subtotal        = getSubtotal();
-      const tax             = taxIncluded ? 0 : taxAmount;
+      const effSub          = getEffectiveSubtotal();
+      const taxTotal        = getTaxTotal();
       const tip             = tipIsFixed ? tipFixedAmt : subtotal * (tipPct / 100);
       const effectiveTipPct = subtotal > 0 ? (tip / subtotal) * 100 : tipPct;
-      const grand           = subtotal + tax + tip;
+      const grand           = effSub - discountAmount + taxTotal + tip;
 
       // Upload any new photos to Supabase Storage
       const receiptUrls  = [...existingReceiptUrls];
@@ -602,16 +708,21 @@
         showToast('Receipt photos could not be saved — check browser console for details', 'error', 6000);
       }
 
+      // Legacy scalar tax_amount = sum of all tax rows (for old getPersonShare callers)
+      const taxAmountScalar = taxTotal;
+
       const billPayload = {
         name,
-        currency:       currencyCode,
-        tip_percentage: effectiveTipPct,
-        tip_split_type: tipSplitType,
+        currency:        currencyCode,
+        tip_percentage:  effectiveTipPct,
+        tip_split_type:  tipSplitType,
         subtotal,
-        tax_amount:     taxAmount,
-        tax_included:   taxIncluded,
-        grand_total:    grand,
-        receipt_urls:   receiptUrls,
+        tax_amount:      taxAmountScalar,
+        tax_items:       taxRows.filter(r => r.amount > 0),
+        tax_included:    taxIncluded,
+        discount_amount: discountAmount,
+        grand_total:     grand,
+        receipt_urls:    receiptUrls,
       };
 
       if (!isEditMode) {
@@ -650,6 +761,7 @@
         quantity: item.quantity,
         note:     item.note || null,
         position: i,
+        discount: item.discount || 0,
       }));
       const { error: iErr } = await db.from('items').insert(itemRows);
       if (iErr) throw iErr;

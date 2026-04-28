@@ -125,6 +125,25 @@ function getPersonColorByPhone(phone, guestList) {
   return idx >= 0 ? getPersonColor(idx) : PERSON_COLORS[0];
 }
 
+// ── Tax helpers ───────────────────────────────────────────────
+// Returns array of {label, amount} tax lines from a bill.
+// Uses tax_items JSONB if present, falls back to single tax_amount.
+// Returns [] when tax is included in item prices.
+function getBillTaxLines(bill) {
+  if (bill.tax_included) return [];
+  if (Array.isArray(bill.tax_items) && bill.tax_items.length > 0) {
+    return bill.tax_items.filter(t => t.amount > 0);
+  }
+  if (bill.tax_amount > 0) {
+    return [{ label: 'Tax', amount: bill.tax_amount }];
+  }
+  return [];
+}
+
+function getBillTotalTax(bill) {
+  return getBillTaxLines(bill).reduce((s, t) => s + t.amount, 0);
+}
+
 // ── Per-person share calculation ─────────────────────────────
 // Returns the total amount owed by `phone`, including tax + tip.
 function getPersonShare(phone, claims, items, guests, bill) {
@@ -139,22 +158,32 @@ function getPersonShare(phone, claims, items, guests, bill) {
     seen.add(key);
     const item = itemMap[c.item_id];
     if (!item) continue;
+    const effectivePrice = item.price - (item.discount || 0);
     const unitClaims = claims.filter(x => x.item_id === c.item_id && x.unit_index === c.unit_index);
-    mySubtotal += item.price / unitClaims.length;
+    mySubtotal += effectivePrice / unitClaims.length;
   }
 
   if (mySubtotal === 0) return 0;
 
-  const billSubtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
+  // Bill subtotal uses effective (post-per-item-discount) prices
+  const billSubtotal = items.reduce((s, i) => s + (i.price - (i.discount || 0)) * i.quantity, 0);
   const shareRatio   = billSubtotal > 0 ? mySubtotal / billSubtotal : 0;
   let total = mySubtotal;
 
-  if (!bill.tax_included && bill.tax_amount > 0) {
-    total += bill.tax_amount * shareRatio;
+  // Whole-bill discount: reduce proportionally
+  if (bill.discount_amount > 0) {
+    total -= bill.discount_amount * shareRatio;
+  }
+
+  const totalTax = getBillTotalTax(bill);
+  if (totalTax > 0) {
+    total += totalTax * shareRatio;
   }
 
   if (bill.tip_percentage > 0) {
-    const tipTotal = billSubtotal * (bill.tip_percentage / 100);
+    // Tip base is pre-discount subtotal (you tip on what you ordered)
+    const preTipBase = items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const tipTotal   = preTipBase * (bill.tip_percentage / 100);
     if (bill.tip_split_type === 'proportional') {
       total += tipTotal * shareRatio;
     } else {
