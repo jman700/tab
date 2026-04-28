@@ -31,7 +31,10 @@
   <h1 id="group-name">Loading…</h1>
   <p id="group-meta" style="font-size:14px;color:var(--text-muted);margin-top:4px;"></p>
 </div>
-<div id="closed-banner" class="hidden" style="background:var(--surface-2);border-bottom:1px solid var(--border);text-align:center;padding:8px 16px;font-size:13px;color:var(--text-muted);">This group is closed</div>
+<div id="closed-banner" class="hidden" style="background:color-mix(in srgb,var(--accent,#B8872A) 12%,transparent);border-bottom:1px solid color-mix(in srgb,var(--accent,#B8872A) 30%,transparent);padding:10px 16px;text-align:center;">
+  <div style="font-size:13px;font-weight:600;color:var(--accent,#B8872A);">Group Finalized</div>
+  <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Expenses are locked — see who you owe below and settle up.</div>
+</div>
 
 <main class="container page" id="main" style="padding-top:0;">
 
@@ -265,20 +268,27 @@
       setText('group-name', g.name);
       setText('group-meta', `${members.length} member${members.length !== 1 ? 's' : ''}`);
 
-      if (g.closed_at) {
-        show($('closed-banner'));
-        $('add-expense-btn').disabled = true;
-        $('add-expense-btn').textContent = 'Group Closed';
-      }
-
       if (g.created_by === user.phone) {
         show($('settings-btn'));
-        $('toggle-close-btn').textContent = g.closed_at ? 'Reopen Group' : 'Close Group';
+        $('toggle-close-btn').textContent = g.closed_at ? 'Reopen Group' : 'Finalize Group';
         $('delete-group-btn').textContent = 'Delete Group';
       }
 
       renderMembers();
       await loadExpenses();
+
+      if (g.closed_at) {
+        show($('closed-banner'));
+        $('add-expense-btn').disabled = true;
+        $('add-expense-btn').textContent = 'Group Finalized';
+        switchTab('balances');
+        await loadBalances();
+        showingSimplified = true;
+        $('simplify-btn').textContent = 'Show All';
+        $('balances-list').style.display = 'none';
+        $('simplified-list').style.display = '';
+        renderSimplified(Balance.simplify(window._lastBalances || []));
+      }
     } catch (err) {
       console.error('loadGroup threw:', err);
       setHTML('group-name', 'Error loading group');
@@ -1177,23 +1187,48 @@
       return;
     }
     setHTML('simplified-list', transfers.map(t => {
-      const isYouPaying = t.from === user.phone;
+      const isYouPaying    = t.from === user.phone;
+      const isYouReceiving = t.to   === user.phone;
+      const venmoHref = `venmo://paycharge?txn=pay&amount=${t.amount.toFixed(2)}&note=${encodeURIComponent('TAB: ' + t.toName)}`;
       return `
-        <div class="bill-card fade-up" style="cursor:pointer;"
+        <div class="bill-card fade-up"
              data-from="${escHtml(t.from)}"
              data-from-name="${escHtml(t.fromName)}"
              data-to="${escHtml(t.to)}"
              data-to-name="${escHtml(t.toName)}"
              data-amount="${t.amount}"
-             onclick="openSettleSheet(this)">
+             style="cursor:${isYouPaying ? 'pointer' : 'default'};"
+             ${isYouPaying ? 'onclick="openSettleSheet(this)"' : ''}>
           <div class="bill-card-top">
-            <div class="bill-card-name">${escHtml(t.fromName)} pays ${escHtml(t.toName)}</div>
+            <div class="bill-card-name">${escHtml(t.fromName)} → ${escHtml(t.toName)}</div>
             <span style="font-size:15px;font-weight:600;color:var(--accent);">${fmtCurrency(t.amount, 'USD')}</span>
           </div>
-          ${isYouPaying ? `<div class="bill-card-meta"><span style="color:var(--accent);">Tap to settle →</span></div>` : ''}
+          ${isYouPaying ? `
+          <div class="bill-card-footer" style="gap:8px;margin-top:8px;">
+            <a href="${escHtml(venmoHref)}"
+               class="btn btn-secondary btn-sm"
+               style="flex:1;text-align:center;text-decoration:none;"
+               onclick="event.stopPropagation()">Pay via Venmo</a>
+            <button class="btn btn-primary btn-sm mark-settled-inline-btn"
+               style="flex:1;"
+               data-from="${escHtml(t.from)}" data-from-name="${escHtml(t.fromName)}"
+               data-to="${escHtml(t.to)}"     data-to-name="${escHtml(t.toName)}"
+               data-amount="${t.amount}"
+               onclick="event.stopPropagation()">Mark Settled</button>
+          </div>` : isYouReceiving ? `
+          <div class="bill-card-meta" style="margin-top:6px;">
+            <span style="color:var(--text-muted);">Awaiting payment from ${escHtml(t.fromName)}</span>
+          </div>` : ''}
         </div>
       `;
     }).join(''));
+
+    $$('.mark-settled-inline-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        openSettleSheet(btn);
+      });
+    });
   }
 
   // ── Settle-Up Sheet ───────────────────────────────────────
@@ -1340,8 +1375,18 @@
   $('toggle-close-btn').addEventListener('click', async () => {
     const btn = $('toggle-close-btn');
     const closing = !group.closed_at;
+
+    if (!closing) {
+      const { data: settlements } = await Groups.getSettlements(groupId);
+      const count = (settlements || []).length;
+      if (count > 0) {
+        const ok = confirm(`${count} settlement${count !== 1 ? 's have' : ' has'} already been recorded. They'll remain logged and factor into the recalculated balance. Reopen anyway?`);
+        if (!ok) return;
+      }
+    }
+
     btn.disabled = true;
-    btn.textContent = closing ? 'Closing…' : 'Reopening…';
+    btn.textContent = closing ? 'Finalizing…' : 'Reopening…';
     try {
       const { error } = await Groups.closeGroup(groupId, !closing);
       if (error) { showToast('Could not update group', 'error'); return; }
@@ -1350,16 +1395,29 @@
         group.closed_at = new Date().toISOString();
         show($('closed-banner'));
         $('add-expense-btn').disabled = true;
-        $('add-expense-btn').textContent = 'Group Closed';
-        showToast('Group closed', 'success');
+        $('add-expense-btn').textContent = 'Group Finalized';
+        switchTab('balances');
+        balancesLoaded = false;
+        await loadBalances();
+        showingSimplified = true;
+        $('simplify-btn').textContent = 'Show All';
+        $('balances-list').style.display = 'none';
+        $('simplified-list').style.display = '';
+        renderSimplified(Balance.simplify(window._lastBalances || []));
+        showToast('Group finalized', 'success');
       } else {
         group.closed_at = null;
         hide($('closed-banner'));
         $('add-expense-btn').disabled = false;
         $('add-expense-btn').textContent = '+ Add Expense';
+        showingSimplified = false;
+        $('simplify-btn').textContent = 'Simplify';
+        $('balances-list').style.display = '';
+        $('simplified-list').style.display = 'none';
+        switchTab('expenses');
         showToast('Group reopened', 'success');
       }
-      btn.textContent = group.closed_at ? 'Reopen Group' : 'Close Group';
+      btn.textContent = group.closed_at ? 'Reopen Group' : 'Finalize Group';
     } finally {
       btn.disabled = false;
     }
