@@ -1306,10 +1306,11 @@
   }
 
   function addOnePending() {
-    const name  = $('new-guest-name').value.trim();
-    const phone = $('new-guest-phone').value.trim();
+    const name     = $('new-guest-name').value.trim();
+    const rawPhone = $('new-guest-phone').value.trim();
     if (!name) { showToast('Name is required', 'error'); $('new-guest-name').focus(); return; }
-    pendingGuests.push({ name, phone: phone || null });
+    const phone = rawPhone ? (Auth.normalizePhone(rawPhone) || rawPhone) : null;
+    pendingGuests.push({ name, phone });
     $('new-guest-name').value  = '';
     $('new-guest-phone').value = '';
     $('new-guest-name').focus();
@@ -1326,8 +1327,9 @@
       const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
       if (!contacts || contacts.length === 0) return;
       contacts.forEach(c => {
-        const name  = (c.name  && c.name[0])  || '';
-        const phone = (c.tel   && c.tel[0])   || null;
+        const name    = (c.name && c.name[0]) || '';
+        const rawTel  = (c.tel  && c.tel[0])  || null;
+        const phone   = rawTel ? (Auth.normalizePhone(rawTel) || rawTel) : null;
         if (name) pendingGuests.push({ name, phone });
       });
       renderPendingGuests();
@@ -1345,13 +1347,28 @@
 
     try {
       const existingPhones = new Set(guests.map(g => g.phone));
-      const rows = pendingGuests
-        .filter(g => !g.phone || !existingPhones.has(g.phone))
-        .map(g => ({
-          bill_id: billId,
-          name:    g.name,
-          phone:   g.phone || `@${crypto.randomUUID().slice(0, 8)}`,
-        }));
+
+      // Normalize any phones that slipped through un-normalized (e.g. from importContacts)
+      const normalized = pendingGuests.map(g => ({
+        ...g,
+        phone: g.phone ? (Auth.normalizePhone(g.phone) || g.phone) : null,
+      }));
+
+      const toInsert = normalized.filter(g => !g.phone || !existingPhones.has(g.phone));
+
+      // Resolve registered display names for any phone that has an account
+      const realPhones = toInsert.map(g => g.phone).filter(p => p && !p.startsWith('@'));
+      let profileByPhone = {};
+      if (realPhones.length > 0) {
+        const { data: profiles } = await db.from('users').select('name, phone').in('phone', realPhones);
+        profileByPhone = Object.fromEntries((profiles || []).map(u => [u.phone, u.name]));
+      }
+
+      const rows = toInsert.map(g => ({
+        bill_id: billId,
+        name:    (g.phone && profileByPhone[g.phone]) || g.name,
+        phone:   g.phone || `@${crypto.randomUUID().slice(0, 8)}`,
+      }));
 
       if (rows.length === 0) {
         showToast('All contacts are already on this bill', 'error');
