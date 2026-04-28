@@ -119,13 +119,18 @@
       <button class="tip-btn" data-val="0">No tip</button>
       <button class="tip-btn" data-val="custom">Custom</button>
     </div>
-    <div class="tip-custom hidden" id="tip-custom-row" style="gap:10px;">
+    <div class="tip-custom hidden" id="tip-custom-row" style="gap:10px;flex-wrap:wrap;">
       <div class="toggle-group" style="flex-shrink:0;">
         <button class="toggle-btn active" id="tip-type-pct">%</button>
         <button class="toggle-btn" id="tip-type-fixed">$</button>
       </div>
       <input class="input" id="tip-custom-input" type="number" min="0" max="100" step="1" placeholder="%" style="max-width:90px;text-align:center;" />
+      <div class="toggle-group hidden" id="tip-currency-toggle" style="flex-shrink:0;">
+        <button class="toggle-btn active" id="tip-cur-local">Local</button>
+        <button class="toggle-btn" id="tip-cur-usd">USD $</button>
+      </div>
     </div>
+    <p class="text-muted mt-4 hidden" style="font-size:12px;" id="tip-usd-note"></p>
     <div style="margin-top:14px;">
       <label class="label mb-8" style="display:block;">Split tip</label>
       <div class="toggle-group">
@@ -166,6 +171,11 @@
     </select>
   </div>
 
+  <div class="hidden" id="group-participants-field" style="margin-top:12px;">
+    <label class="label mb-8" style="display:block;">Who was part of this bill? <span style="font-weight:400;font-size:11px;">(select all that apply)</span></label>
+    <div id="group-participants-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+  </div>
+
   <!-- Publish -->
   <button class="btn btn-primary btn-full btn-lg hidden mt-4 mb-16" id="publish-btn">
     Share Bill →
@@ -189,12 +199,16 @@
   let tipPct              = 20;
   let tipIsFixed          = false;
   let tipFixedAmt         = 0;
+  let tipInUsd            = false;
+  let tipUsdAmount        = 0;
+  let tipExchangeRate     = null; // local-per-USD rate (e.g. MXN per USD)
   let tipSplitType        = 'proportional';
   let taxRows             = []; // [{label, amount}]
   let taxIncluded         = false;
   let discountAmount      = 0;
   let isEditMode          = false;
   let existingClaimsCount = 0;
+  let groupParticipants   = []; // phones of group members on this bill
   let currencyCode        = 'USD';
 
   // ── Init ─────────────────────────────────────────────────
@@ -243,6 +257,8 @@
     tipSplitType         = bill.tip_split_type || 'proportional';
     taxIncluded          = bill.tax_included || false;
     discountAmount       = bill.discount_amount || 0;
+    tipUsdAmount         = bill.tip_usd_amount || 0;
+    tipInUsd             = tipUsdAmount > 0;
 
     // Load tax rows: prefer tax_items JSONB, fall back to scalar tax_amount
     if (Array.isArray(bill.tax_items) && bill.tax_items.length > 0) {
@@ -334,10 +350,15 @@
     );
 
     $('tip-custom-input').addEventListener('input', debounce(() => {
+      const val = toNum($('tip-custom-input').value);
       if (tipIsFixed) {
-        tipFixedAmt = toNum($('tip-custom-input').value);
+        if (tipInUsd) {
+          tipUsdAmount = val;
+        } else {
+          tipFixedAmt = val;
+        }
       } else {
-        tipPct = toNum($('tip-custom-input').value);
+        tipPct = val;
       }
       updateTotals();
     }, 300));
@@ -345,8 +366,11 @@
     $('tip-type-pct').addEventListener('click', () => {
       if (!tipIsFixed) return;
       tipIsFixed = false;
+      tipInUsd   = false;
       $('tip-type-pct').classList.add('active');
       $('tip-type-fixed').classList.remove('active');
+      hide($('tip-currency-toggle'));
+      hide($('tip-usd-note'));
       const inp = $('tip-custom-input');
       inp.placeholder = '%';
       inp.max         = '100';
@@ -364,7 +388,33 @@
       inp.placeholder = '0.00';
       inp.removeAttribute('max');
       inp.step        = '0.01';
-      inp.value       = tipFixedAmt || '';
+      inp.value       = tipInUsd ? (tipUsdAmount || '') : (tipFixedAmt || '');
+      if (currencyCode !== 'USD') show($('tip-currency-toggle'));
+      updateTotals();
+    });
+
+    $('tip-cur-local').addEventListener('click', () => {
+      if (!tipInUsd) return;
+      tipInUsd = false;
+      $('tip-cur-local').classList.add('active');
+      $('tip-cur-usd').classList.remove('active');
+      hide($('tip-usd-note'));
+      $('tip-custom-input').value = tipFixedAmt || '';
+      updateTotals();
+    });
+
+    $('tip-cur-usd').addEventListener('click', async () => {
+      if (tipInUsd) return;
+      tipInUsd = true;
+      $('tip-cur-usd').classList.add('active');
+      $('tip-cur-local').classList.remove('active');
+      $('tip-custom-input').value = tipUsdAmount || '';
+      if (!tipExchangeRate && currencyCode !== 'USD') {
+        setText('tip-usd-note', 'Fetching exchange rate…');
+        show($('tip-usd-note'));
+        const rate = await getExchangeRate('USD', currencyCode);
+        tipExchangeRate = rate;
+      }
       updateTotals();
     });
 
@@ -379,7 +429,44 @@
       })
     );
 
+    $('bill-group-select').addEventListener('change', () => renderGroupParticipants());
+
     $('publish-btn').addEventListener('click', publishBill);
+  }
+
+  async function renderGroupParticipants() {
+    const groupId = $('bill-group-select').value;
+    const field   = $('group-participants-field');
+    const list    = $('group-participants-list');
+    if (!groupId) { hide(field); groupParticipants = []; return; }
+
+    list.innerHTML = '<p style="font-size:13px;color:var(--text-muted);">Loading members…</p>';
+    show(field);
+
+    const { data: members, error } = await Groups.getMembers(groupId);
+    if (error || !members) { list.innerHTML = ''; return; }
+
+    // Default: all members checked
+    if (groupParticipants.length === 0) {
+      groupParticipants = members.map(m => m.phone);
+    }
+
+    list.innerHTML = members.map(m => {
+      const checked = groupParticipants.includes(m.phone);
+      const isMe    = m.phone === user.phone;
+      return `
+        <label style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--surface-2);border-radius:var(--radius);cursor:pointer;">
+          <input type="checkbox" class="participant-cb" data-phone="${escHtml(m.phone)}" ${checked ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer;" />
+          <span style="font-size:14px;">${escHtml(m.display_name)}${isMe ? ' <span style="font-size:11px;color:var(--text-muted);">(you)</span>' : ''}</span>
+        </label>
+      `;
+    }).join('');
+
+    list.querySelectorAll('.participant-cb').forEach(cb => {
+      cb.addEventListener('change', () => {
+        groupParticipants = [...list.querySelectorAll('.participant-cb:checked')].map(c => c.dataset.phone);
+      });
+    });
   }
 
   // ── File handling + OCR ───────────────────────────────────
@@ -604,18 +691,40 @@
     return taxRows.reduce((s, r) => s + (r.amount || 0), 0);
   }
 
+  function getTipAmount() {
+    if (!tipIsFixed) return subtotalForTip() * (tipPct / 100);
+    if (tipInUsd && tipExchangeRate) return tipUsdAmount * tipExchangeRate;
+    if (tipInUsd) return 0; // rate not yet loaded
+    return tipFixedAmt;
+  }
+
+  function subtotalForTip() { return getSubtotal(); }
+
   function updateTotals() {
     const subtotal  = getSubtotal();
     const effSub    = getEffectiveSubtotal();
-    const itemDiscs = subtotal - effSub; // sum of per-item discounts
+    const itemDiscs = subtotal - effSub;
     const totalDisc = discountAmount + itemDiscs;
     const taxTotal  = getTaxTotal();
-    const tip       = tipIsFixed ? tipFixedAmt : subtotal * (tipPct / 100);
+    const tip       = getTipAmount();
     const grand     = effSub - discountAmount + taxTotal + tip;
 
-    const tipLabel = tipIsFixed
-      ? fmtCurrency(tipFixedAmt, currencyCode) + ' fixed'
-      : `${tipPct}%`;
+    let tipLabel;
+    if (tipIsFixed && tipInUsd) {
+      tipLabel = tipExchangeRate
+        ? `$${tipUsdAmount} USD ≈ ${fmtCurrency(tip, currencyCode)}`
+        : `$${tipUsdAmount} USD (fetching rate…)`;
+    } else if (tipIsFixed) {
+      tipLabel = fmtCurrency(tipFixedAmt, currencyCode) + ' fixed';
+    } else {
+      tipLabel = `${tipPct}%`;
+    }
+
+    if (tipInUsd && tipExchangeRate) {
+      const note = `$${tipUsdAmount} USD × ${tipExchangeRate.toFixed(4)} = ${fmtCurrency(tip, currencyCode)}`;
+      setText('tip-usd-note', note);
+      show($('tip-usd-note'));
+    }
 
     setText('t-subtotal',  fmtCurrency(subtotal, currencyCode));
 
@@ -690,7 +799,7 @@
       const subtotal        = getSubtotal();
       const effSub          = getEffectiveSubtotal();
       const taxTotal        = getTaxTotal();
-      const tip             = tipIsFixed ? tipFixedAmt : subtotal * (tipPct / 100);
+      const tip             = getTipAmount();
       const effectiveTipPct = subtotal > 0 ? (tip / subtotal) * 100 : tipPct;
       const grand           = effSub - discountAmount + taxTotal + tip;
 
@@ -735,6 +844,7 @@
         currency:        currencyCode,
         tip_percentage:  effectiveTipPct,
         tip_split_type:  tipSplitType,
+        tip_usd_amount:  tipInUsd ? tipUsdAmount : 0,
         subtotal,
         tax_amount:      taxAmountScalar,
         tax_items:       taxRows.filter(r => r.amount > 0),
@@ -747,12 +857,13 @@
       if (!isEditMode) {
         const groupId = $('bill-group-select').value || null;
         const { error: bErr } = await db.from('bills').insert({
-          id:               billId,
+          id:                 billId,
           ...billPayload,
-          created_by_phone: user.phone,
-          created_by_name:  user.name,
-          status:           'active',
-          group_id:         groupId,
+          created_by_phone:   user.phone,
+          created_by_name:    user.name,
+          status:             'active',
+          group_id:           groupId,
+          group_participants: groupId ? groupParticipants : [],
         });
         if (bErr) throw bErr;
 

@@ -174,6 +174,7 @@
 
       const allBills = [...(owned || []), ...joined]
         .filter((b, i, arr) => arr.findIndex(x => x.id === b.id) === i)
+        .filter(b => !b.group_id)
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
       renderDashboard(allBills, owned || []);

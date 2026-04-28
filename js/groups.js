@@ -186,14 +186,29 @@ const Groups = (() => {
 
     return {
       data: bills.map(bill => {
-        const claims = claimsByBill[bill.id] || [];
-        const items  = itemsByBill[bill.id]  || [];
-        const guests = guestsByBill[bill.id] || [];
-        const memberShares = guests.map(g => ({
-          phone:  g.phone,
-          amount: getPersonShare(g.phone, claims, items, guests, bill),
-        }));
-        return { ...bill, paid_by_phone: bill.paid_by_phone || bill.created_by_phone, memberShares };
+        const paidBy     = bill.paid_by_phone || bill.created_by_phone;
+        const claims     = claimsByBill[bill.id] || [];
+        const items      = itemsByBill[bill.id]  || [];
+        const guests     = guestsByBill[bill.id] || [];
+        const participants = Array.isArray(bill.group_participants) && bill.group_participants.length > 0
+          ? bill.group_participants
+          : null;
+
+        let memberShares;
+        if (participants) {
+          // Equal split among designated group participants
+          const n = participants.length;
+          const share = n > 0 ? (bill.grand_total || 0) / n : 0;
+          memberShares = participants.map(phone => ({ phone, amount: share }));
+        } else {
+          // Claims-based split among bill guests
+          memberShares = guests.map(g => ({
+            phone:  g.phone,
+            amount: getPersonShare(g.phone, claims, items, guests, bill),
+          }));
+        }
+
+        return { ...bill, paid_by_phone: paidBy, memberShares };
       }),
     };
   }
@@ -266,8 +281,11 @@ const Groups = (() => {
     return {};
   }
 
-  async function assignBillToGroup(billId, groupId) {
-    const { error } = await db.from('bills').update({ group_id: groupId || null }).eq('id', billId);
+  async function assignBillToGroup(billId, groupId, participants) {
+    const patch = { group_id: groupId || null };
+    if (groupId && Array.isArray(participants)) patch.group_participants = participants;
+    if (!groupId) patch.group_participants = [];
+    const { error } = await db.from('bills').update(patch).eq('id', billId);
     if (error) return { error };
     return {};
   }
