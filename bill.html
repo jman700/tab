@@ -888,8 +888,9 @@
     if (tip > 0) { totRow(`Tip (${bill.tip_percentage}%)`, tip, y); y += 20; }
 
     y += 10; thickLine(y); y += 2 + 8;
+    const canvasTotal = subtotal + tax + tip;
     draw('TOTAL',                    P,     y + 20, sans(14, true), ACCENT);
-    draw(fmtCurrency(conv(bill.grand_total), currency), W - P, y + 20, sans(14, true), ACCENT, 'right');
+    draw(fmtCurrency(conv(canvasTotal), currency), W - P, y + 20, sans(14, true), ACCENT, 'right');
     y += 26;
     thickLine(y); y += 2 + 16;
 
@@ -934,19 +935,22 @@
   $('summary-backdrop').addEventListener('click',  () => closeSheet('summary-backdrop', 'summary-sheet'));
 
   function renderSummary() {
-    const metaTotal = (billCurrency !== 'USD' && exchangeRate)
-      ? fmtCurrency(bill.grand_total * exchangeRate, 'USD')
-      : fmtCurrency(bill.grand_total, billCurrency);
-    setText('summary-meta', `${bill.name} · ${metaTotal} total`);
+    const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const tax      = bill.tax_included ? 0 : (bill.tax_amount || 0);
+    const tip      = subtotal * ((bill.tip_percentage || 0) / 100);
+    const computed = subtotal + tax + tip;
 
-    const subtotal    = items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const metaTotal = (billCurrency !== 'USD' && exchangeRate)
+      ? fmtCurrency(computed * exchangeRate, 'USD')
+      : fmtCurrency(computed, billCurrency);
+    setText('summary-meta', `${bill.name} · ${metaTotal} total`);
 
     const showDual = billCurrency !== 'USD' && !!exchangeRate;
 
     const summaryList = guests.map((g, i) => {
       const share     = getPersonShare(g.phone, claims, items, guests, bill);
       const color     = getPersonColor(i);
-      const pct       = bill.grand_total > 0 ? (share / bill.grand_total * 100) : 0;
+      const pct       = computed > 0 ? (share / computed * 100) : 0;
       const isMe      = g.phone === user.phone;
       const usdAmt    = showDual ? fmtCurrency(share * exchangeRate, 'USD') : display(share);
       const localLine = showDual
@@ -985,11 +989,11 @@
 
     setHTML('summary-totals', `
       <div class="summary-total-row"><span class="key">Subtotal</span><span>${dualAmt(subtotal)}</span></div>
-      <div class="summary-total-row"><span class="key">Tax</span><span>${dualAmt(bill.tax_amount)}</span></div>
-      <div class="summary-total-row"><span class="key">Tip (${bill.tip_percentage}%)</span><span>${dualAmt(tip)}</span></div>
+      ${tax > 0 ? `<div class="summary-total-row"><span class="key">Tax</span><span>${dualAmt(tax)}</span></div>` : ''}
+      ${tip > 0 ? `<div class="summary-total-row"><span class="key">Tip (${bill.tip_percentage}%)</span><span>${dualAmt(tip)}</span></div>` : ''}
       <div class="summary-final">
         <span class="key">Total</span>
-        <span class="val">${dualAmt(bill.grand_total)}</span>
+        <span class="val">${dualAmt(computed)}</span>
       </div>
     `);
 
