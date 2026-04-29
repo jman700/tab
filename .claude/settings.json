@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git pull 2>/dev/null || true",
+            "statusMessage": "Pulling latest changes..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "Write a session handoff note for the tab project (bill splitter with Claude Vision OCR). Run: (1) git log --oneline --since='8 hours ago', (2) git status, (3) cat HANDOFF.md 2>/dev/null, (4) cat .claude/memory/*.md 2>/dev/null. Then write HANDOFF.md with: today's date and time, what was worked on this session, current project state, and the exact next step to resume. Under 300 words, plain English.",
+            "timeout": 90,
+            "statusMessage": "Writing session handoff notes..."
+          },
+          {
+            "type": "command",
+            "command": "git add HANDOFF.md .claude/memory/ CLAUDE.md 2>/dev/null; git diff --cached --quiet || git commit -m 'handoff: session notes'; git push 2>/dev/null || true",
+            "statusMessage": "Pushing handoff notes..."
+          }
+        ]
+      }
+    ]
+  }
+}
