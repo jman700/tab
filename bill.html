@@ -227,6 +227,20 @@
   <button class="btn btn-ghost btn-full mt-8" id="cancel-add-guest-btn">Cancel</button>
 </div>
 
+<!-- Joint Entry Modal -->
+<div class="sheet-backdrop" id="joint-modal-backdrop" style="display:none;z-index:300;"></div>
+<div id="joint-modal" style="display:none;position:fixed;inset:0;z-index:301;align-items:center;justify-content:center;padding:24px;">
+  <div style="background:var(--surface);border-radius:var(--radius-lg);padding:24px;width:100%;max-width:380px;box-shadow:var(--shadow-lg);">
+    <h3 style="margin:0 0 6px;font-size:17px;">Party Name</h3>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Enter how you'd like to appear on the bill</p>
+    <input class="input" id="joint-name-input" type="text" placeholder="e.g. Antonio &amp; Maria" style="margin-bottom:12px;" />
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-primary" style="flex:1;" onclick="saveJointEntry()">Save</button>
+      <button class="btn btn-ghost" style="flex:1;" onclick="cancelJointForm()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="/js/config.js"></script>
 <script src="/js/auth.js"></script>
@@ -460,14 +474,10 @@
       const partnerControl = canManagePartner
         ? isJointActive
           ? `<button class="claim-for-btn" onclick="resetJointEntry('${g.id}','${g.phone}')">Party of 2 ✕</button>`
-          : jointFormOpen === g.id
-            ? `<div class="joint-form" style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap;">
-                 <input id="joint-name-input" class="input" style="font-size:13px;padding:6px 10px;min-width:160px;flex:1;" placeholder="e.g. Antonio &amp; Maria" value="${escHtml(g.name)} &amp; " />
-                 <button class="btn btn-primary btn-sm" onclick="saveJointEntry('${g.id}')">Save</button>
-                 <button class="btn btn-ghost btn-sm" onclick="cancelJointForm()">Cancel</button>
-               </div>`
-            : `<button class="claim-for-btn" onclick="openJointForm('${g.id}')">+1 Partner</button>`
+          : `<button class="claim-for-btn" onclick="openJointForm('${g.id}')">+1 Partner</button>`
         : '';
+
+      const pills = [paidBtn, claimForBtn, partnerControl].filter(Boolean).join('');
 
       return `
         <div class="guest-row" id="guest-${g.id}">
@@ -481,11 +491,9 @@
           <div class="guest-actions" style="flex-direction:column;align-items:flex-end;gap:4px;">
             <div style="display:flex;align-items:center;gap:6px;">
               ${display(myShare)}
-              ${paidBtn}
               ${removeBtn}
             </div>
-            ${claimForBtn}
-            ${partnerControl}
+            ${pills ? `<div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;">${pills}</div>` : ''}
           </div>
         </div>
       `;
@@ -612,19 +620,35 @@
   // ── Joint Entry ───────────────────────────────────────────
   function openJointForm(guestId) {
     jointFormOpen = guestId;
-    renderGuests();
-    setTimeout(() => {
-      const input = document.getElementById('joint-name-input');
-      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
-    }, 50);
+    const g     = guests.find(x => x.id === guestId);
+    const input = document.getElementById('joint-name-input');
+    if (input) input.value = g ? `${g.name} & ` : '';
+    const backdrop = $('joint-modal-backdrop');
+    const modal    = $('joint-modal');
+    backdrop.style.display = 'block';
+    modal.style.display    = 'flex';
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        backdrop.classList.add('visible');
+        if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+      });
+    });
   }
 
   function cancelJointForm() {
     jointFormOpen = null;
-    renderGuests();
+    const backdrop = $('joint-modal-backdrop');
+    const modal    = $('joint-modal');
+    backdrop.classList.remove('visible');
+    setTimeout(() => {
+      backdrop.style.display = 'none';
+      modal.style.display    = 'none';
+    }, 300);
   }
 
-  async function saveJointEntry(guestId) {
+  async function saveJointEntry() {
+    const guestId = jointFormOpen;
+    if (!guestId) return;
     const input = document.getElementById('joint-name-input');
     const name  = input ? input.value.trim() : '';
     if (!name) { showToast('Enter a name for your party', 'error'); return; }
@@ -638,7 +662,7 @@
 
     const idx = guests.findIndex(g => g.id === guestId);
     if (idx >= 0) { guests[idx].name = name; guests[idx].headcount = 2; }
-    jointFormOpen = null;
+    cancelJointForm();
     renderGuests();
     renderItems();
     renderSummary();
@@ -814,6 +838,7 @@
   $('close-add-guest-btn').addEventListener('click',  () => closeSheet('add-guest-backdrop', 'add-guest-sheet'));
   $('cancel-add-guest-btn').addEventListener('click', () => closeSheet('add-guest-backdrop', 'add-guest-sheet'));
   $('add-guest-backdrop').addEventListener('click',   () => closeSheet('add-guest-backdrop', 'add-guest-sheet'));
+  $('joint-modal-backdrop').addEventListener('click', cancelJointForm);
   $('import-contacts-btn').addEventListener('click',  importContacts);
   $('add-one-btn').addEventListener('click',     addOnePending);
   $('save-guests-btn').addEventListener('click', saveGuests);
@@ -1460,6 +1485,8 @@
       renderGuests();
       if (isOwner && bill.status !== 'closed') renderPayerSection();
       setText('guest-count', guests.length);
+      btn.disabled = false;
+      btn.textContent = 'Add to Bill';
       closeSheet('add-guest-backdrop', 'add-guest-sheet');
       showToast(`${newGuests.length} guest${newGuests.length !== 1 ? 's' : ''} added!`, 'success');
     } catch (err) {
