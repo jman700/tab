@@ -31,10 +31,6 @@
   <h1 style="margin-bottom:6px;" id="page-title">New Bill</h1>
   <p class="text-muted mb-16" style="font-size:14px;">Set up a bill to split with your group.</p>
 
-  <div id="edit-claims-warning" class="hidden" style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:13px;color:var(--text-muted);line-height:1.5;">
-    <strong style="color:var(--text);">Guests have already claimed items.</strong><br>
-    Saving changes will clear <span id="edit-claims-count"></span> existing claim(s) and guests will need to re-claim.
-  </div>
 
   <!-- Step 1: Bill Name -->
   <div class="setup-section">
@@ -207,6 +203,7 @@
   let taxIncluded         = false;
   let discountAmount      = 0;
   let isEditMode          = false;
+  let originalItemIds     = []; // UUIDs of items as loaded from DB
   let existingClaimsCount = 0;
   let groupParticipants   = []; // phones of group members on this bill
   let currencyCode        = 'USD';
@@ -245,6 +242,7 @@
     isEditMode = true;
     billId     = id;
     setText('page-title', 'Edit Bill');
+    $('publish-btn').textContent = 'Save Changes';
 
     const { data: bill, error } = await db.from('bills').select('*').eq('id', id).single();
     if (error || !bill) { showToast('Bill not found', 'error'); return; }
@@ -271,14 +269,7 @@
 
     const { data: dbItems } = await db.from('items').select('*').eq('bill_id', id).order('position');
     items = (dbItems || []).map(i => ({ ...i, tempId: i.id, discount: toNum(i.discount) }));
-
-    // Check for existing claims
-    const { count } = await db.from('claims').select('*', { count: 'exact', head: true }).eq('bill_id', id);
-    existingClaimsCount = count || 0;
-    if (existingClaimsCount > 0) {
-      setText('edit-claims-count', String(existingClaimsCount));
-      show($('edit-claims-warning'));
-    }
+    originalItemIds = items.map(i => i.id);
 
     $('discount-input').value = discountAmount > 0 ? discountAmount.toFixed(2) : '';
     setActiveTipBtn(tipPct);
@@ -797,11 +788,6 @@
     if (!name)              return showToast('Please name this bill', 'error');
     if (items.length === 0) return showToast('Please add at least one item', 'error');
 
-    if (isEditMode && existingClaimsCount > 0) {
-      const ok = confirm(`This bill has ${existingClaimsCount} existing claim(s). Saving will clear them and guests will need to re-claim. Continue?`);
-      if (!ok) return;
-    }
-
     const btn = $('publish-btn');
     btn.disabled    = true;
     btn.textContent = 'Saving…';
@@ -892,7 +878,49 @@
         }).eq('id', billId);
         if (bErr) throw bErr;
 
-        await db.from('items').delete().eq('bill_id', billId);
+        // Split items into existing (has a real DB UUID) vs newly added
+        const existingItems = items.filter(i => i.id && !String(i.id).startsWith('tmp_'));
+        const newItems      = items.filter(i => !i.id || String(i.id).startsWith('tmp_'));
+        const keptIds       = new Set(existingItems.map(i => i.id));
+
+        // Delete items the user removed (cascade removes their claims too)
+        const removedIds = originalItemIds.filter(id => !keptIds.has(id));
+        if (removedIds.length) {
+          await db.from('items').delete().in('id', removedIds);
+        }
+
+        // Update existing items in place — claims survive since item IDs don't change
+        for (const item of existingItems) {
+          const { error: uErr } = await db.from('items').update({
+            name:     item.name,
+            price:    item.price,
+            quantity: item.quantity,
+            note:     item.note || null,
+            position: items.indexOf(item),
+            discount: item.discount || 0,
+          }).eq('id', item.id);
+          if (uErr) throw uErr;
+          // Drop claims for unit slots that no longer exist (quantity reduced)
+          await db.from('claims').delete().eq('item_id', item.id).gte('unit_index', item.quantity);
+        }
+
+        // Insert brand-new items
+        if (newItems.length) {
+          const newRows = newItems.map(item => ({
+            bill_id:  billId,
+            name:     item.name,
+            price:    item.price,
+            quantity: item.quantity,
+            note:     item.note || null,
+            position: items.indexOf(item),
+            discount: item.discount || 0,
+          }));
+          const { error: iErr } = await db.from('items').insert(newRows);
+          if (iErr) throw iErr;
+        }
+
+        navigateTo(`/bill/${billId}`);
+        return;
       }
 
       const itemRows = items.map((item, i) => ({
@@ -914,7 +942,7 @@
       const msg = err?.message || err?.code || err?.details || JSON.stringify(err) || 'unknown';
       showToast(`Save failed: ${msg}`, 'error', 8000);
       btn.disabled    = false;
-      btn.textContent = 'Share Bill →';
+      btn.textContent = isEditMode ? 'Save Changes' : 'Share Bill →';
     }
   }
 
