@@ -53,6 +53,7 @@ CREATE TABLE tab.guests (
   has_confirmed      BOOLEAN DEFAULT FALSE,
   has_paid           BOOLEAN DEFAULT FALSE,
   joined_at          TIMESTAMPTZ DEFAULT NOW(),
+  headcount          INTEGER NOT NULL DEFAULT 1,
   UNIQUE(bill_id, phone)
 );
 
@@ -114,6 +115,7 @@ CREATE POLICY "public_all" ON tab.users FOR ALL USING (true) WITH CHECK (true);
 ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS currency      TEXT    DEFAULT 'USD';
 ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS receipt_urls  TEXT[]  DEFAULT '{}';
 ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS paid_by_phone TEXT;
+ALTER TABLE tab.guests ADD COLUMN IF NOT EXISTS headcount INTEGER NOT NULL DEFAULT 1;
 
 -- ── Groups ───────────────────────────────────────────────────
 -- Run this block once to add group support.
