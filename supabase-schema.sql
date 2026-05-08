@@ -116,6 +116,7 @@ ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS currency      TEXT    DEFAULT 'US
 ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS receipt_urls  TEXT[]  DEFAULT '{}';
 ALTER TABLE tab.bills ADD COLUMN IF NOT EXISTS paid_by_phone TEXT;
 ALTER TABLE tab.guests ADD COLUMN IF NOT EXISTS headcount INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE tab.bills  ADD COLUMN IF NOT EXISTS payers    JSONB   DEFAULT '[]';
 
 -- ── Groups ───────────────────────────────────────────────────
 -- Run this block once to add group support.

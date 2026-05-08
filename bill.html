@@ -83,10 +83,11 @@
   <!-- Owner: payer selector -->
   <div id="payer-controls" class="hidden mt-16">
     <div class="field" style="margin-bottom:4px;">
-      <label style="font-size:12px;margin-bottom:6px;">Bill Payer <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;">(who fronted the money)</span></label>
-      <select class="input" id="payer-select" style="padding:9px 12px;font-size:14px;cursor:pointer;"></select>
+      <label style="font-size:12px;margin-bottom:8px;">Bill Payers <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;">(who fronted the money)</span></label>
+      <div id="payer-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+      <button class="btn btn-secondary btn-sm" id="add-payer-btn" style="margin-top:8px;">+ Add payer</button>
     </div>
-    <p style="font-size:12px;color:var(--text-muted);margin-bottom:0;">Others will see a Venmo button to pay this person.</p>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:0;">Guests see Venmo buttons — payments are routed to settle everything in the fewest transactions.</p>
   </div>
 
   <!-- Owner: close bill -->
@@ -265,8 +266,8 @@
   let kioskGuest     = null;
   let jointFormOpen  = null;   // guest id whose +1 form is open
   let pendingGuests  = [];
-  let paidByPhone    = null; // who actually paid the bill (defaults to creator)
-  let payerVenmo     = null; // that person's Venmo handle
+  let payers         = []; // [{phone, amount}] from bills.payers JSONB
+  let payerProfiles  = {}; // phone → {name, venmo_handle}
 
   function display(amount) {
     if (showConverted && exchangeRate) return fmtCurrency((amount || 0) * exchangeRate, 'USD');
@@ -381,10 +382,19 @@
     guests = guestsRes.data || [];
     claims = claimsRes.data || [];
 
-    paidByPhone = bill.paid_by_phone || bill.created_by_phone;
-    const { data: payerProfile } = await db.from('users')
-      .select('venmo_handle').eq('phone', paidByPhone).single();
-    payerVenmo = payerProfile?.venmo_handle || null;
+    // Load payers — new JSONB column, fall back to legacy paid_by_phone
+    if (Array.isArray(bill.payers) && bill.payers.length > 0) {
+      payers = bill.payers;
+    } else if (bill.paid_by_phone) {
+      payers = [{ phone: bill.paid_by_phone, amount: null }];
+    } else {
+      payers = [{ phone: bill.created_by_phone, amount: null }];
+    }
+    const payerPhones = [...new Set(payers.map(p => p.phone).filter(Boolean))];
+    if (payerPhones.length > 0) {
+      const { data: profiles } = await db.from('users').select('phone, name, venmo_handle').in('phone', payerPhones);
+      for (const p of (profiles || [])) payerProfiles[p.phone] = p;
+    }
 
     isOwner = bill.created_by_phone === user.phone;
     myGuest = guests.find(g => g.phone === user.phone) || null;
@@ -515,7 +525,13 @@
       let myItemShare = 0;
 
       const chips = Array.from({ length: item.quantity }, (_, unitIdx) => {
-        const unitClaims = claims.filter(c => c.item_id === item.id && c.unit_index === unitIdx);
+        const unitClaims = claims
+          .filter(c => c.item_id === item.id && c.unit_index === unitIdx)
+          .sort((a, b) => {
+            const ai = guests.findIndex(g => g.phone === a.guest_phone);
+            const bi = guests.findIndex(g => g.phone === b.guest_phone);
+            return ai - bi;
+          });
         const isEmpty    = unitClaims.length === 0;
         const isMine     = unitClaims.some(c => c.guest_phone === activePhone);
 
@@ -1092,23 +1108,85 @@
 
   // ── Bill Payer ────────────────────────────────────────────
   function renderPayerSection() {
-    const sel = $('payer-select');
-    sel.innerHTML = guests.map(g => {
-      const label = g.phone === bill.created_by_phone ? `${g.name} (creator)` : g.name;
-      return `<option value="${escHtml(g.phone)}" ${g.phone === paidByPhone ? 'selected' : ''}>${escHtml(label)}</option>`;
+    const list = $('payer-list');
+    list.innerHTML = payers.map((p, i) => {
+      const guestOpts = guests.map(g =>
+        `<option value="${escHtml(g.phone)}" ${g.phone === p.phone ? 'selected' : ''}>${escHtml(g.name)}</option>`
+      ).join('');
+      return `
+        <div style="display:flex;gap:8px;align-items:center;">
+          <select class="input" style="flex:1;font-size:14px;padding:9px 12px;" onchange="updatePayerPhone(${i}, this.value)">${guestOpts}</select>
+          <input class="input" type="number" min="0" step="0.01" placeholder="Amount paid"
+            value="${p.amount != null ? p.amount : ''}"
+            style="width:130px;font-size:14px;"
+            onchange="updatePayerAmount(${i}, this.value)" />
+          <button class="btn-icon" onclick="removePayer(${i})">×</button>
+        </div>`;
     }).join('');
     show($('payer-controls'));
   }
 
-  $('payer-select').addEventListener('change', async () => {
-    const newPhone = $('payer-select').value;
-    const { error } = await db.from('bills').update({ paid_by_phone: newPhone }).eq('id', billId);
-    if (error) return showToast('Could not update payer — try again', 'error');
-    paidByPhone = newPhone;
-    const { data: profile } = await db.from('users').select('venmo_handle').eq('phone', newPhone).single();
-    payerVenmo = profile?.venmo_handle || null;
-    showToast('Bill payer updated', 'success');
+  $('add-payer-btn').addEventListener('click', async () => {
+    payers.push({ phone: guests[0]?.phone || '', amount: null });
+    renderPayerSection();
+    await savePayers();
   });
+
+  async function updatePayerPhone(idx, phone) {
+    payers[idx].phone = phone;
+    if (phone && !payerProfiles[phone]) {
+      const { data: p } = await db.from('users').select('phone, name, venmo_handle').eq('phone', phone).single();
+      if (p) payerProfiles[phone] = p;
+    }
+    await savePayers();
+  }
+
+  async function updatePayerAmount(idx, val) {
+    payers[idx].amount = val !== '' ? parseFloat(val) : null;
+    await savePayers();
+  }
+
+  async function removePayer(idx) {
+    payers.splice(idx, 1);
+    renderPayerSection();
+    await savePayers();
+  }
+
+  async function savePayers() {
+    const { error } = await db.from('bills').update({ payers }).eq('id', billId);
+    if (error) { showToast('Could not save payers', 'error'); return; }
+    if ($('summary-sheet')?.classList.contains('visible')) renderSummary();
+  }
+
+  // ── Debt Settlement ───────────────────────────────────────
+  // Returns [{from, to, amount}] — minimum transactions to zero all balances.
+  function settleDebts() {
+    const paid = {};
+    for (const p of payers) {
+      if (p.phone && p.amount > 0) paid[p.phone] = (paid[p.phone] || 0) + p.amount;
+    }
+    if (Object.keys(paid).length === 0) return [];
+
+    const balances = guests.map(g => ({
+      phone: g.phone,
+      net: (paid[g.phone] || 0) - getPersonShare(g.phone, claims, items, guests, bill),
+    })).filter(b => Math.abs(b.net) > 0.005);
+
+    const creditors = balances.filter(b => b.net > 0).map(b => ({ ...b })).sort((a, b) => b.net - a.net);
+    const debtors   = balances.filter(b => b.net < 0).map(b => ({ ...b })).sort((a, b) => a.net - b.net);
+
+    const payments = [];
+    let ci = 0, di = 0;
+    while (ci < creditors.length && di < debtors.length) {
+      const amt = Math.min(creditors[ci].net, -debtors[di].net);
+      payments.push({ from: debtors[di].phone, to: creditors[ci].phone, amount: amt });
+      creditors[ci].net -= amt;
+      debtors[di].net   += amt;
+      if (creditors[ci].net < 0.005) ci++;
+      if (-debtors[di].net < 0.005) di++;
+    }
+    return payments;
+  }
 
   // ── Summary Sheet ─────────────────────────────────────────
   $('summary-btn').addEventListener('click', () => {
@@ -1144,7 +1222,7 @@
       const color     = getPersonColor(i);
       const pct       = computed > 0 ? (share / computed * 100) : 0;
       const isMe      = g.phone === user.phone;
-      const isPayer   = g.phone === paidByPhone;
+      const isPayer   = payers.some(p => p.phone === g.phone);
       const usdAmt    = showDual ? fmtCurrency(share * exchangeRate, 'USD') : display(share);
       const localLine = showDual
         ? `<div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${fmtCurrency(share, billCurrency)}</div>`
@@ -1210,61 +1288,52 @@
       </div>
     `);
 
-    // Venmo pay button — shown to any non-payer with a share
-    const myShare   = getPersonShare(user.phone, claims, items, guests, bill);
-    if (user.phone !== paidByPhone && myShare > 0) {
-      const payerName  = guests.find(g => g.phone === paidByPhone)?.name || 'the bill payer';
-      const isNonUSD   = billCurrency !== 'USD';
-      const venmoNote  = encodeURIComponent(bill.name);
-      const usdAmt     = isNonUSD && exchangeRate ? (myShare * exchangeRate).toFixed(2) : (!isNonUSD ? myShare.toFixed(2) : null);
+    // Payment instructions — who does the current user owe, and how much?
+    const myShare     = getPersonShare(user.phone, claims, items, guests, bill);
+    const amIAPayer   = payers.some(p => p.phone === user.phone);
+    const hasAmounts  = payers.length > 0 && payers.every(p => p.amount != null && p.amount > 0);
+    const venmoNote   = encodeURIComponent(bill.name);
+    const isNonUSD    = billCurrency !== 'USD';
 
-      if (payerVenmo) {
-        if (isNonUSD && !exchangeRate) {
-          setHTML('venmo-pay-wrap', `
-            <div style="margin-top:20px;padding:16px;background:var(--surface-2);border-radius:var(--radius);text-align:center;">
-              <p style="font-size:13px;color:var(--text-muted);margin-bottom:6px;">
-                Pay <strong style="color:var(--text);">@${escHtml(payerVenmo)}</strong> (${escHtml(payerName)})
-              </p>
-              <p style="font-size:12px;color:var(--text-muted);">Exchange rate unavailable — open Venmo manually.</p>
-            </div>
-          `);
-        } else {
-          const venmoUrl = `venmo://paycharge?txn=pay&recipients=${encodeURIComponent(payerVenmo)}&amount=${usdAmt}&note=${venmoNote}`;
-          setHTML('venmo-pay-wrap', `
-            <div style="margin-top:20px;padding:16px;background:var(--surface-2);border-radius:var(--radius);text-align:center;">
-              <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">
-                Pay <strong style="color:var(--text);">@${escHtml(payerVenmo)}</strong> (${escHtml(payerName)})
-              </p>
-              <a href="${venmoUrl}" class="btn btn-primary btn-full" style="text-decoration:none;display:block;">
-                Pay ${usdAmt ? '$' + usdAmt : ''} on Venmo
-              </a>
-              <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">Opens the Venmo app with your amount pre-filled.</p>
-            </div>
-          `);
-        }
-      } else if (usdAmt) {
-        const venmoUrl = `venmo://paycharge?txn=pay&amount=${usdAmt}&note=${venmoNote}`;
-        setHTML('venmo-pay-wrap', `
-          <div style="margin-top:20px;padding:16px;background:var(--surface-2);border-radius:var(--radius);text-align:center;">
-            <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">
-              Pay <strong style="color:var(--text);">${escHtml(payerName)}</strong> $${usdAmt}
-            </p>
-            <a href="${venmoUrl}" class="btn btn-primary btn-full" style="text-decoration:none;display:block;">
-              Pay $${usdAmt} on Venmo
-            </a>
-            <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">Search for ${escHtml(payerName)} in Venmo. Payer can add their @handle in Profile for one-tap payments.</p>
-          </div>
-        `);
+    function venmoCard(toPhone, rawAmount) {
+      const profile  = payerProfiles[toPhone];
+      const toName   = profile?.name || guests.find(g => g.phone === toPhone)?.name || 'payer';
+      const toVenmo  = profile?.venmo_handle || null;
+      const usdAmt   = isNonUSD && exchangeRate ? (rawAmount * exchangeRate).toFixed(2)
+                     : !isNonUSD                ? rawAmount.toFixed(2)
+                     : null;
+      if (toVenmo && usdAmt) {
+        const url = `venmo://paycharge?txn=pay&recipients=${encodeURIComponent(toVenmo)}&amount=${usdAmt}&note=${venmoNote}`;
+        return `
+          <div style="padding:14px;background:var(--surface-2);border-radius:var(--radius);text-align:center;margin-bottom:10px;">
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">Pay <strong style="color:var(--text);">@${escHtml(toVenmo)}</strong> (${escHtml(toName)})</p>
+            <a href="${url}" class="btn btn-primary btn-full" style="text-decoration:none;display:block;">Pay $${usdAmt} on Venmo</a>
+            <p style="font-size:11px;color:var(--text-muted);margin-top:6px;">Opens Venmo with your amount pre-filled.</p>
+          </div>`;
+      }
+      return `
+        <div style="padding:14px;background:var(--surface-2);border-radius:var(--radius);text-align:center;margin-bottom:10px;">
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:${usdAmt ? '8px' : '0'};">
+            Pay <strong style="color:var(--text);">${escHtml(toName)}</strong>${usdAmt ? ` $${usdAmt}` : ''}
+          </p>
+          ${usdAmt ? `<a href="venmo://paycharge?txn=pay&amount=${usdAmt}&note=${venmoNote}" class="btn btn-primary btn-full" style="text-decoration:none;display:block;">Pay $${usdAmt} on Venmo</a>
+          <p style="font-size:11px;color:var(--text-muted);margin-top:6px;">Search for ${escHtml(toName)} in Venmo to pay.</p>` : ''}
+        </div>`;
+    }
+
+    if (payers.length === 0 || amIAPayer || myShare <= 0.005) {
+      setHTML('venmo-pay-wrap', '');
+    } else if (hasAmounts) {
+      // Full debt settlement mode
+      const myPayments = settleDebts().filter(p => p.from === user.phone);
+      if (myPayments.length === 0) {
+        setHTML('venmo-pay-wrap', '');
       } else {
-        setHTML('venmo-pay-wrap', `
-          <div style="margin-top:20px;padding:16px;background:var(--surface-2);border-radius:var(--radius);text-align:center;">
-            <p style="font-size:13px;color:var(--text-muted);">Open Venmo and pay <strong style="color:var(--text);">${escHtml(payerName)}</strong> for ${escHtml(bill.name)}.</p>
-            <p style="font-size:11px;color:var(--text-muted);margin-top:6px;">Payer can add their @handle in Profile for one-tap payments.</p>
-          </div>
-        `);
+        setHTML('venmo-pay-wrap', `<div style="margin-top:20px;">${myPayments.map(p => venmoCard(p.to, p.amount)).join('')}</div>`);
       }
     } else {
-      setHTML('venmo-pay-wrap', '');
+      // No amounts set yet — fall back to single-payer mode using myShare
+      setHTML('venmo-pay-wrap', `<div style="margin-top:20px;">${venmoCard(payers[0].phone, myShare)}</div>`);
     }
   }
 
