@@ -86,6 +86,7 @@
     <div class="field" style="margin-bottom:4px;">
       <label style="font-size:12px;margin-bottom:8px;">Bill Payers <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;">(who fronted the money)</span></label>
       <div id="payer-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+      <div id="payer-validation"></div>
       <button class="btn btn-secondary btn-sm" id="add-payer-btn" style="margin-top:8px;">+ Add payer</button>
     </div>
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:0;">Guests see Venmo buttons — payments are routed to settle everything in the fewest transactions.</p>
@@ -228,6 +229,17 @@
 
   <button class="btn btn-primary btn-full" id="save-guests-btn">Add to Bill</button>
   <button class="btn btn-ghost btn-full mt-8" id="cancel-add-guest-btn">Cancel</button>
+</div>
+
+<!-- Cover Modal -->
+<div class="sheet-backdrop" id="cover-modal-backdrop" style="display:none;z-index:300;"></div>
+<div id="cover-modal" style="display:none;position:fixed;inset:0;z-index:301;align-items:center;justify-content:center;padding:24px;">
+  <div style="background:var(--surface);border-radius:var(--radius-lg);padding:24px;width:100%;max-width:380px;box-shadow:var(--shadow-lg);">
+    <h3 style="margin:0 0 6px;font-size:17px;">Who's covering <span id="cover-modal-name"></span>?</h3>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Their full bill share will be added to the covering guest's total.</p>
+    <div id="cover-guest-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;"></div>
+    <button class="btn btn-ghost btn-full" onclick="closeCoverModal()">Cancel</button>
+  </div>
 </div>
 
 <!-- Joint Entry Modal -->
@@ -489,7 +501,15 @@
           : `<button class="claim-for-btn" onclick="openJointForm('${g.id}')">+1 Partner</button>`
         : '';
 
-      const pills = [paidBtn, claimForBtn, partnerControl].filter(Boolean).join('');
+      const isCovered      = !!g.covered_by_phone;
+      const coveringGuest  = isCovered ? guests.find(x => x.phone === g.covered_by_phone) : null;
+      const coverControl   = isOwner && bill.status !== 'closed'
+        ? isCovered
+          ? `<button class="claim-for-btn" style="color:var(--green);border-color:var(--green);" onclick="removeCover('${g.id}')">Covered ✕</button>`
+          : `<button class="claim-for-btn" onclick="openCoverModal('${g.id}')">Cover tab</button>`
+        : '';
+
+      const pills = [paidBtn, claimForBtn, partnerControl, coverControl].filter(Boolean).join('');
 
       return `
         <div class="guest-row" id="guest-${g.id}">
@@ -498,11 +518,11 @@
           </div>
           <div class="guest-info">
             <div class="guest-name">${escHtml(g.name)}${isMe ? ' <span style="color:var(--text-muted);font-size:12px;">(you)</span>' : ''} ${ownerTag}</div>
-            <div class="guest-phone">${phoneDisplay} ${confirmedDot}</div>
+            <div class="guest-phone">${isCovered ? `<span style="color:var(--green);font-size:11px;">Covered by ${escHtml(coveringGuest?.name || '—')}</span>` : `${phoneDisplay} ${confirmedDot}`}</div>
           </div>
           <div class="guest-actions" style="flex-direction:column;align-items:flex-end;gap:4px;">
             <div style="display:flex;align-items:center;gap:6px;">
-              ${display(myShare)}
+              ${isCovered ? `<span style="font-size:12px;color:var(--green);">—</span>` : display(myShare)}
               ${removeBtn}
             </div>
             ${pills ? `<div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;">${pills}</div>` : ''}
@@ -636,6 +656,53 @@
   }
 
   // ── Joint Entry ───────────────────────────────────────────
+  // ── Cover Modal ───────────────────────────────────────────
+  let _coverTargetId = null;
+
+  function openCoverModal(guestId) {
+    _coverTargetId = guestId;
+    const target = guests.find(g => g.id === guestId);
+    setText('cover-modal-name', target?.name || 'this guest');
+
+    $('cover-guest-list').innerHTML = guests
+      .filter(g => g.id !== guestId && !g.covered_by_phone)
+      .map(g => `<button class="btn btn-secondary btn-full" onclick="setCover('${guestId}','${escHtml(g.phone)}')">${escHtml(g.name)}</button>`)
+      .join('');
+
+    const backdrop = $('cover-modal-backdrop');
+    const modal    = $('cover-modal');
+    backdrop.style.display = 'block';
+    modal.style.display    = 'flex';
+    requestAnimationFrame(() => requestAnimationFrame(() => backdrop.classList.add('visible')));
+  }
+
+  function closeCoverModal() {
+    _coverTargetId = null;
+    const backdrop = $('cover-modal-backdrop');
+    const modal    = $('cover-modal');
+    backdrop.classList.remove('visible');
+    setTimeout(() => { backdrop.style.display = 'none'; modal.style.display = 'none'; }, 300);
+  }
+
+  async function setCover(coveredId, coveringPhone) {
+    const { error } = await db.from('guests').update({ covered_by_phone: coveringPhone }).eq('id', coveredId);
+    if (error) { showToast('Could not save — try again', 'error'); return; }
+    const idx = guests.findIndex(g => g.id === coveredId);
+    if (idx >= 0) guests[idx].covered_by_phone = coveringPhone;
+    closeCoverModal();
+    renderGuests();
+    renderSummary();
+  }
+
+  async function removeCover(coveredId) {
+    const { error } = await db.from('guests').update({ covered_by_phone: null }).eq('id', coveredId);
+    if (error) { showToast('Could not remove — try again', 'error'); return; }
+    const idx = guests.findIndex(g => g.id === coveredId);
+    if (idx >= 0) guests[idx].covered_by_phone = null;
+    renderGuests();
+    renderSummary();
+  }
+
   function openJointForm(guestId) {
     jointFormOpen = guestId;
     const g     = guests.find(x => x.id === guestId);
@@ -837,7 +904,18 @@
   });
 
   // ── Share ─────────────────────────────────────────────────
-  $('share-btn').addEventListener('click', () => copyToClipboard(window.location.href));
+  $('share-btn').addEventListener('click', async () => {
+    const url = window.location.href;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: bill.name, text: `Join ${bill.name} on Tab — claim your items`, url });
+        return;
+      } catch (e) {
+        if (e.name === 'AbortError') return;
+      }
+    }
+    copyToClipboard(url);
+  });
 
   // ── Guests toggle ─────────────────────────────────────────
   $('toggle-guests-btn').addEventListener('click', () => {
@@ -858,6 +936,7 @@
   $('cancel-add-guest-btn').addEventListener('click', () => closeSheet('add-guest-backdrop', 'add-guest-sheet'));
   $('add-guest-backdrop').addEventListener('click',   () => closeSheet('add-guest-backdrop', 'add-guest-sheet'));
   $('joint-modal-backdrop').addEventListener('click', cancelJointForm);
+  $('cover-modal-backdrop').addEventListener('click', closeCoverModal);
   $('import-contacts-btn').addEventListener('click',  importContacts);
   $('add-one-btn').addEventListener('click',     addOnePending);
   $('save-guests-btn').addEventListener('click', saveGuests);
@@ -1136,12 +1215,7 @@
     const payerTotal = payers.reduce((s, p) => s + (p.amount || 0), 0);
     const allSet     = payers.length > 0 && payers.every(p => p.amount != null && p.amount > 0);
 
-    let validationEl = $('payer-validation');
-    if (!validationEl) {
-      validationEl = document.createElement('div');
-      validationEl.id = 'payer-validation';
-      $('payer-controls').insertBefore(validationEl, $('add-payer-btn'));
-    }
+    const validationEl = $('payer-validation');
 
     if (allSet) {
       const diff = payerTotal - billTotal;
@@ -1260,21 +1334,25 @@
       const color     = getPersonColor(i);
       const pct       = computed > 0 ? (share / computed * 100) : 0;
       const isMe      = g.phone === user.phone;
-      const isPayer   = payers.some(p => p.phone === g.phone);
+      const isPayer      = payers.some(p => p.phone === g.phone);
+      const isCovered    = !!g.covered_by_phone;
+      const coveringName = isCovered ? (guests.find(x => x.phone === g.covered_by_phone)?.name || '—') : null;
       const usdAmt    = showDual ? fmtCurrency(share * exchangeRate, 'USD') : display(share);
       const localLine = showDual
         ? `<div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${fmtCurrency(share, billCurrency)}</div>`
         : '';
       const paidBadge = isPayer
         ? `<div style="margin-top:4px;"><span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:var(--accent-light);color:var(--accent);border:1px solid rgba(184,135,42,0.35);">Paid bill</span></div>`
+        : isCovered
+        ? `<div style="margin-top:4px;"><span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:rgba(74,198,103,0.15);color:var(--green);border:1px solid rgba(74,198,103,0.35);">Covered by ${escHtml(coveringName)}</span></div>`
         : g.has_paid
         ? `<div style="font-size:11px;color:var(--green);margin-top:3px;">✓ Paid</div>`
         : '';
-      const markPaidBtn = isOwner && !isMe && !isPayer && share > 0
+      const markPaidBtn = isOwner && !isMe && !isPayer && !isCovered && share > 0
         ? `<button class="paid-toggle ${g.has_paid ? 'paid' : ''}" onclick="togglePaid('${g.id}', ${!g.has_paid})" style="margin-top:6px;font-size:11px;padding:2px 8px;">${g.has_paid ? '✓ Paid' : 'Mark paid'}</button>`
         : '';
       return `
-        <div class="summary-row" style="${g.has_paid && !isPayer ? 'opacity:0.6;' : ''}">
+        <div class="summary-row" style="${(g.has_paid && !isPayer) || isCovered ? 'opacity:0.6;' : ''}">
           <div class="summary-avatar" style="background:${color}22;color:${color};border:2px solid ${color}44;">
             ${getInitials(g.name)}
           </div>

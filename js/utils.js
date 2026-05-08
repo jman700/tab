@@ -145,8 +145,8 @@ function getBillTotalTax(bill) {
 }
 
 // ── Per-person share calculation ─────────────────────────────
-// Returns the total amount owed by `phone`, including tax + tip.
-function getPersonShare(phone, claims, items, guests, bill) {
+// Internal: raw share for `phone` ignoring any coverage relationships.
+function _rawShare(phone, claims, items, guests, bill) {
   const itemMap  = Object.fromEntries(items.map(i => [i.id, i]));
   const myClaims = claims.filter(c => c.guest_phone === phone);
   const seen     = new Set();
@@ -170,35 +170,45 @@ function getPersonShare(phone, claims, items, guests, bill) {
 
   if (mySubtotal === 0) return 0;
 
-  // Bill subtotal uses effective (post-per-item-discount) prices
   const billSubtotal = items.reduce((s, i) => s + (i.price - (i.discount || 0)) * i.quantity, 0);
   const shareRatio   = billSubtotal > 0 ? mySubtotal / billSubtotal : 0;
   let total = mySubtotal;
 
-  // Whole-bill discount: reduce proportionally
-  if (bill.discount_amount > 0) {
-    total -= bill.discount_amount * shareRatio;
-  }
+  if (bill.discount_amount > 0) total -= bill.discount_amount * shareRatio;
 
   const totalTax = getBillTotalTax(bill);
-  if (totalTax > 0) {
-    total += totalTax * shareRatio;
-  }
+  if (totalTax > 0) total += totalTax * shareRatio;
 
   if (bill.tip_percentage > 0) {
-    // Tip base is pre-discount subtotal (you tip on what you ordered)
     const preTipBase = items.reduce((s, i) => s + i.price * i.quantity, 0);
     const tipTotal   = preTipBase * (bill.tip_percentage / 100);
     if (bill.tip_split_type === 'proportional') {
       total += tipTotal * shareRatio;
     } else {
-      // Equal split: weight by headcount; only among guests who actually claimed something
       const activePhones  = new Set(claims.map(c => c.guest_phone));
       const totalHeads    = guests
         .filter(g => activePhones.has(g.phone))
         .reduce((sum, g) => sum + (g.headcount || 1), 0);
       const myHeadcount   = (guests.find(g => g.phone === phone)?.headcount) || 1;
       total += (tipTotal / Math.max(1, totalHeads)) * myHeadcount;
+    }
+  }
+
+  return total;
+}
+
+// Public: returns total owed by `phone`.
+// Covered guests owe 0; covering guests absorb the covered guest's raw share.
+function getPersonShare(phone, claims, items, guests, bill) {
+  const me = guests.find(g => g.phone === phone);
+  if (me?.covered_by_phone) return 0;
+
+  let total = _rawShare(phone, claims, items, guests, bill);
+
+  // Add shares for any guests this person is covering
+  for (const g of guests) {
+    if (g.covered_by_phone === phone) {
+      total += _rawShare(g.phone, claims, items, guests, bill);
     }
   }
 
