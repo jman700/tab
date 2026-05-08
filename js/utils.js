@@ -2,6 +2,52 @@
 // TAB — Utilities
 // ============================================================
 
+// ── Payment methods ──────────────────────────────────────────
+const PAYMENT_METHODS_CONFIG = {
+  venmo:    { label: 'Venmo',      prefix: '@', placeholder: 'username',        color: '#3D95CE' },
+  cashapp:  { label: 'Cash App',   prefix: '$', placeholder: 'cashtag',         color: '#00A844' },
+  paypal:   { label: 'PayPal',     prefix: '',  placeholder: 'username',         color: '#0070BA' },
+  zelle:    { label: 'Zelle',      prefix: '',  placeholder: 'email or phone',   color: '#6D1ED4' },
+  applepay: { label: 'Apple Cash', prefix: '',  placeholder: 'Apple ID or name', color: '#1c1c1e' },
+};
+
+// Returns a deep-link URL string, or null if the method has no deep link.
+function paymentDeepLink(type, handle, usdAmt, note) {
+  const h = (handle || '').trim();
+  if (!h) return null;
+  switch (type) {
+    case 'venmo':
+      return usdAmt
+        ? `venmo://paycharge?txn=pay&recipients=${encodeURIComponent(h)}&amount=${usdAmt}&note=${encodeURIComponent(note || '')}`
+        : null;
+    case 'cashapp': {
+      const tag = h.startsWith('$') ? h : '$' + h;
+      return `https://cash.app/${encodeURIComponent(tag)}${usdAmt ? '/' + usdAmt : ''}`;
+    }
+    case 'paypal':
+      return `https://paypal.me/${encodeURIComponent(h)}${usdAmt ? '/' + usdAmt : ''}`;
+    default:
+      return null;
+  }
+}
+
+// Returns handle formatted for display (@user, $tag, etc.).
+function paymentDisplayHandle(type, handle) {
+  const h = (handle || '').trim();
+  if (!h) return '';
+  if (type === 'venmo')   return '@' + h.replace(/^@/, '');
+  if (type === 'cashapp') return h.startsWith('$') ? h : '$' + h;
+  return h;
+}
+
+// Normalizes a handle for storage (strips prefix).
+function paymentNormalizeHandle(type, handle) {
+  const h = (handle || '').trim();
+  if (type === 'venmo')   return h.replace(/^@/, '');
+  if (type === 'cashapp') return h.replace(/^\$/, '');
+  return h;
+}
+
 // ── Currency list ────────────────────────────────────────────
 const CURRENCIES = [
   { code: 'USD', name: 'US Dollar'          },

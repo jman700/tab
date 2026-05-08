@@ -406,7 +406,7 @@
     }
     const payerPhones = [...new Set(payers.map(p => p.phone).filter(Boolean))];
     if (payerPhones.length > 0) {
-      const { data: profiles } = await db.from('users').select('phone, name, venmo_handle').in('phone', payerPhones);
+      const { data: profiles } = await db.from('users').select('phone, name, venmo_handle, payment_methods').in('phone', payerPhones);
       for (const p of (profiles || [])) payerProfiles[p.phone] = p;
     }
 
@@ -1246,7 +1246,7 @@
   async function updatePayerPhone(idx, phone) {
     payers[idx].phone = phone;
     if (phone && !payerProfiles[phone]) {
-      const { data: p } = await db.from('users').select('phone, name, venmo_handle').eq('phone', phone).single();
+      const { data: p } = await db.from('users').select('phone, name, venmo_handle, payment_methods').eq('phone', phone).single();
       if (p) payerProfiles[phone] = p;
     }
     await savePayers();
@@ -1417,9 +1417,24 @@
           const toName    = toIdx   >= 0 ? guests[toIdx].name   : p.to;
           const fromColor = getPersonColor(fromIdx >= 0 ? fromIdx : 0);
           const toColor   = getPersonColor(toIdx   >= 0 ? toIdx   : 0);
-          const toVenmo   = payerProfiles[p.to]?.venmo_handle;
+          const toProfile = payerProfiles[p.to];
+          const toMethods = [...(Array.isArray(toProfile?.payment_methods) ? toProfile.payment_methods : [])];
+          if (toProfile?.venmo_handle && !toMethods.some(m => m.type === 'venmo')) {
+            toMethods.unshift({ type: 'venmo', handle: toProfile.venmo_handle });
+          }
+          const activeMethods = toMethods.filter(m => m.handle?.trim());
           const rawAmt    = showDual && exchangeRate ? p.amount * exchangeRate : p.amount;
           const amtStr    = display(rawAmt);
+          const usdAmt    = isNonUSD && exchangeRate ? (p.amount * exchangeRate).toFixed(2)
+                          : !isNonUSD                ? p.amount.toFixed(2) : null;
+          const methodBadges = activeMethods.map(m => {
+            const cfg  = PAYMENT_METHODS_CONFIG[m.type] || { label: m.type, color: 'var(--accent)' };
+            const hdl  = paymentDisplayHandle(m.type, paymentNormalizeHandle(m.type, m.handle));
+            const link = paymentDeepLink(m.type, paymentNormalizeHandle(m.type, m.handle), usdAmt, bill.name);
+            return link
+              ? `<a href="${escHtml(link)}" style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;background:${escHtml(cfg.color)}22;color:${escHtml(cfg.color)};border:1px solid ${escHtml(cfg.color)}44;text-decoration:none;flex-shrink:0;">${escHtml(cfg.label)}</a>`
+              : `<span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;background:${escHtml(cfg.color)}22;color:${escHtml(cfg.color)};border:1px solid ${escHtml(cfg.color)}44;flex-shrink:0;" title="${escHtml(hdl)}">${escHtml(cfg.label)}</span>`;
+          }).join('');
           return `
             <div style="padding:10px 0;border-bottom:1px solid var(--border);">
               <div style="display:flex;align-items:center;gap:8px;">
@@ -1427,11 +1442,11 @@
                 <span style="font-size:13px;font-weight:500;color:${fromColor};flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(fromName)}</span>
                 <span style="font-size:13px;font-weight:600;color:var(--text);flex-shrink:0;">${amtStr}</span>
               </div>
-              <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding-left:36px;">
+              <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding-left:36px;flex-wrap:wrap;">
                 <span style="font-size:11px;color:var(--text-muted);">pays →</span>
                 <div style="width:24px;height:24px;border-radius:50%;background:${toColor}22;color:${toColor};border:1.5px solid ${toColor}44;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;flex-shrink:0;">${getInitials(toName)}</div>
                 <span style="font-size:13px;font-weight:500;color:${toColor};flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(toName)}</span>
-                ${toVenmo ? `<span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">@${escHtml(toVenmo)}</span>` : ''}
+                ${methodBadges}
               </div>
             </div>`;
         }).join('');
@@ -1454,30 +1469,51 @@
     const venmoNote   = encodeURIComponent(bill.name);
     const isNonUSD    = billCurrency !== 'USD';
 
-    function venmoCard(toPhone, rawAmount) {
-      const profile  = payerProfiles[toPhone];
-      const toName   = profile?.name || guests.find(g => g.phone === toPhone)?.name || 'payer';
-      const toVenmo  = profile?.venmo_handle || null;
-      const usdAmt   = isNonUSD && exchangeRate ? (rawAmount * exchangeRate).toFixed(2)
-                     : !isNonUSD                ? rawAmount.toFixed(2)
-                     : null;
-      if (toVenmo && usdAmt) {
-        const url = `venmo://paycharge?txn=pay&recipients=${encodeURIComponent(toVenmo)}&amount=${usdAmt}&note=${venmoNote}`;
-        return `
-          <div style="padding:14px;background:var(--surface-2);border-radius:var(--radius);text-align:center;margin-bottom:10px;">
-            <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">Pay <strong style="color:var(--text);">@${escHtml(toVenmo)}</strong> (${escHtml(toName)})</p>
-            <a href="${url}" class="btn btn-primary btn-full" style="text-decoration:none;display:block;">Pay $${usdAmt} on Venmo</a>
-            <p style="font-size:11px;color:var(--text-muted);margin-top:6px;">Opens Venmo with your amount pre-filled.</p>
-          </div>`;
+    function paymentCard(toPhone, rawAmount) {
+      const profile = payerProfiles[toPhone];
+      const toName  = profile?.name || guests.find(g => g.phone === toPhone)?.name || 'payer';
+      const usdAmt  = isNonUSD && exchangeRate ? (rawAmount * exchangeRate).toFixed(2)
+                    : !isNonUSD                ? rawAmount.toFixed(2)
+                    : null;
+
+      // Merge payment_methods + legacy venmo_handle, dedup by type
+      const methods = [...(Array.isArray(profile?.payment_methods) ? profile.payment_methods : [])];
+      if (profile?.venmo_handle && !methods.some(m => m.type === 'venmo')) {
+        methods.unshift({ type: 'venmo', handle: profile.venmo_handle });
       }
-      return `
-        <div style="padding:14px;background:var(--surface-2);border-radius:var(--radius);text-align:center;margin-bottom:10px;">
-          <p style="font-size:13px;color:var(--text-muted);margin-bottom:${usdAmt ? '8px' : '0'};">
-            Pay <strong style="color:var(--text);">${escHtml(toName)}</strong>${usdAmt ? ` $${usdAmt}` : ''}
-          </p>
-          ${usdAmt ? `<a href="venmo://paycharge?txn=pay&amount=${usdAmt}&note=${venmoNote}" class="btn btn-primary btn-full" style="text-decoration:none;display:block;">Pay $${usdAmt} on Venmo</a>
-          <p style="font-size:11px;color:var(--text-muted);margin-top:6px;">Search for ${escHtml(toName)} in Venmo to pay.</p>` : ''}
+      const activeMethods = methods.filter(m => m.handle?.trim());
+
+      const amtDisplay = display(rawAmount);
+      const header = `<p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+        You owe <strong style="color:var(--text);">${escHtml(toName)}</strong>
+        <strong style="color:var(--accent);"> ${amtDisplay}</strong>
+      </p>`;
+
+      if (!activeMethods.length) {
+        return `<div style="padding:14px;background:var(--surface-2);border-radius:var(--radius);margin-bottom:10px;">
+          ${header}
+          <p style="font-size:12px;color:var(--text-muted);">Ask ${escHtml(toName)} how they'd like to be paid.</p>
         </div>`;
+      }
+
+      const btns = activeMethods.map(m => {
+        const cfg          = PAYMENT_METHODS_CONFIG[m.type] || { label: m.type, color: 'var(--accent)' };
+        const handle       = paymentNormalizeHandle(m.type, m.handle);
+        const displayHdl   = paymentDisplayHandle(m.type, handle);
+        const link         = paymentDeepLink(m.type, handle, usdAmt, bill.name);
+        if (link) {
+          return `<a href="${escHtml(link)}" class="btn btn-full" style="text-decoration:none;display:block;margin-bottom:6px;background:${escHtml(cfg.color)};color:#fff;border-color:transparent;">
+              Pay ${amtDisplay} on ${escHtml(cfg.label)}
+            </a>
+            <p style="font-size:11px;color:var(--text-muted);margin:-2px 0 10px;text-align:center;">${escHtml(cfg.label)}: ${escHtml(displayHdl)}</p>`;
+        }
+        return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
+            <span style="font-size:13px;flex:1;">${escHtml(cfg.label)}: <strong>${escHtml(displayHdl)}</strong></span>
+            <button class="btn btn-ghost btn-sm" style="flex-shrink:0;" onclick="copyToClipboard('${escHtml(displayHdl)}')">Copy</button>
+          </div>`;
+      }).join('');
+
+      return `<div style="padding:14px;background:var(--surface-2);border-radius:var(--radius);margin-bottom:10px;">${header}${btns}</div>`;
     }
 
     if (payers.length === 0 || amIAPayer || myShare <= 0.005) {
@@ -1488,11 +1524,11 @@
       if (myPayments.length === 0) {
         setHTML('venmo-pay-wrap', '');
       } else {
-        setHTML('venmo-pay-wrap', `<div style="margin-top:20px;">${myPayments.map(p => venmoCard(p.to, p.amount)).join('')}</div>`);
+        setHTML('venmo-pay-wrap', `<div style="margin-top:20px;">${myPayments.map(p => paymentCard(p.to, p.amount)).join('')}</div>`);
       }
     } else {
       // No amounts set yet — fall back to single-payer mode using myShare
-      setHTML('venmo-pay-wrap', `<div style="margin-top:20px;">${venmoCard(payers[0].phone, myShare)}</div>`);
+      setHTML('venmo-pay-wrap', `<div style="margin-top:20px;">${paymentCard(payers[0].phone, myShare)}</div>`);
     }
   }
 

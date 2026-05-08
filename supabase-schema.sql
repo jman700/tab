@@ -214,6 +214,7 @@ ALTER TABLE tab.items  ADD COLUMN IF NOT EXISTS discount           NUMERIC DEFAU
 ALTER TABLE tab.bills  ADD COLUMN IF NOT EXISTS group_participants TEXT[]  DEFAULT '{}';
 ALTER TABLE tab.bills  ADD COLUMN IF NOT EXISTS tip_usd_amount     NUMERIC DEFAULT 0;
 ALTER TABLE tab.guests ADD COLUMN IF NOT EXISTS covered_by_phone   TEXT;
+ALTER TABLE tab.users  ADD COLUMN IF NOT EXISTS payment_methods    JSONB DEFAULT '[]';
 
 -- Storage bucket setup:
 -- 1. Create a bucket named "receipts" and set it to Public (allows public reads).

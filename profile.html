@@ -34,7 +34,7 @@
       <input class="input" id="name-input" type="text" placeholder="Your name" autocomplete="name" />
     </div>
 
-    <div class="field mb-16">
+    <div class="field mb-24">
       <label>Phone Number</label>
       <input class="input" id="phone-display" type="tel" disabled style="background:var(--surface-2);color:var(--text-muted);" />
       <span style="font-size:12px;color:var(--text-muted);margin-top:4px;display:block;">
@@ -42,19 +42,16 @@
       </span>
     </div>
 
-    <div class="field mb-16">
-      <label for="venmo-input">Venmo Handle <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;">(optional)</span></label>
-      <div style="display:flex;align-items:stretch;gap:0;">
-        <span style="display:flex;align-items:center;padding:0 12px;background:var(--surface);border:1px solid var(--border);border-right:none;border-radius:var(--radius-sm) 0 0 var(--radius-sm);color:var(--text-muted);font-size:15px;flex-shrink:0;">@</span>
-        <input class="input" id="venmo-input" type="text" placeholder="yourhandle"
-               style="border-radius:0 var(--radius-sm) var(--radius-sm) 0;border-left:none;" />
-      </div>
-      <span style="font-size:12px;color:var(--text-muted);margin-top:4px;display:block;">
-        Guests on your bills will see a "Pay on Venmo" button with your handle.
+    <div class="field mb-8">
+      <label>Payment Methods <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;color:var(--text-muted);">— optional</span></label>
+      <div id="payment-methods-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;"></div>
+      <button class="btn btn-ghost btn-sm" id="add-method-btn" style="width:100%;border:1px dashed var(--border);">+ Add payment method</button>
+      <span style="font-size:12px;color:var(--text-muted);margin-top:6px;display:block;">
+        Guests will see pay buttons for each method you add. Deep links open Venmo, Cash App, and PayPal with your amount pre-filled.
       </span>
     </div>
 
-    <button class="btn btn-primary btn-full" id="save-btn">Save Changes</button>
+    <button class="btn btn-primary btn-full mt-4" id="save-btn">Save Changes</button>
   </div>
 </main>
 
@@ -69,34 +66,95 @@
   $('phone-display').value = Auth.formatPhone(user.phone);
   $('name-input').value    = user.name;
 
+  const METHOD_TYPES = [
+    { value: 'venmo',    label: 'Venmo'       },
+    { value: 'cashapp',  label: 'Cash App'    },
+    { value: 'paypal',   label: 'PayPal'      },
+    { value: 'zelle',    label: 'Zelle'       },
+    { value: 'applepay', label: 'Apple Cash'  },
+  ];
+
+  let paymentMethods = []; // [{type, handle}]
+
+  function renderPaymentMethods() {
+    const list = $('payment-methods-list');
+    if (!paymentMethods.length) { list.innerHTML = ''; return; }
+    list.innerHTML = paymentMethods.map((m, idx) => {
+      const cfg    = PAYMENT_METHODS_CONFIG[m.type] || {};
+      const prefix = cfg.prefix || '';
+      return `
+        <div style="display:flex;align-items:center;gap:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;">
+          <select class="input" style="flex:0 0 106px;padding:5px 6px;font-size:13px;" onchange="updateMethod(${idx},'type',this.value)">
+            ${METHOD_TYPES.map(t => `<option value="${t.value}"${m.type===t.value?' selected':''}>${escHtml(t.label)}</option>`).join('')}
+          </select>
+          ${prefix ? `<span style="font-size:13px;color:var(--text-muted);flex-shrink:0;">${escHtml(prefix)}</span>` : ''}
+          <input class="input" style="flex:1;padding:5px 8px;font-size:13px;" placeholder="${escHtml(cfg.placeholder||'handle')}" value="${escHtml(m.handle||'')}" oninput="updateMethod(${idx},'handle',this.value)" />
+          <button style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:20px;line-height:1;padding:0 2px;flex-shrink:0;" onclick="removeMethod(${idx})" title="Remove">×</button>
+        </div>`;
+    }).join('');
+  }
+
+  function updateMethod(idx, field, val) {
+    paymentMethods[idx] = { ...paymentMethods[idx], [field]: val };
+    if (field === 'type') renderPaymentMethods();
+  }
+
+  function removeMethod(idx) {
+    paymentMethods.splice(idx, 1);
+    renderPaymentMethods();
+  }
+
+  $('add-method-btn').addEventListener('click', () => {
+    const usedTypes = new Set(paymentMethods.map(m => m.type));
+    const nextType  = METHOD_TYPES.find(t => !usedTypes.has(t.value))?.value || 'venmo';
+    paymentMethods.push({ type: nextType, handle: '' });
+    renderPaymentMethods();
+  });
+
   async function loadProfile() {
-    const { data } = await db.from('users').select('name, venmo_handle').eq('phone', user.phone).single();
-    if (data) {
-      $('name-input').value  = data.name || user.name;
-      $('venmo-input').value = data.venmo_handle || '';
+    const { data } = await db.from('users')
+      .select('name, venmo_handle, payment_methods')
+      .eq('phone', user.phone).single();
+    if (!data) return;
+    $('name-input').value = data.name || user.name;
+
+    let methods = Array.isArray(data.payment_methods) && data.payment_methods.length
+      ? data.payment_methods
+      : [];
+    // Migrate legacy venmo_handle if no methods stored yet
+    if (!methods.length && data.venmo_handle) {
+      methods = [{ type: 'venmo', handle: data.venmo_handle }];
     }
+    paymentMethods = methods;
+    renderPaymentMethods();
   }
 
   $('save-btn').addEventListener('click', async () => {
-    const name  = $('name-input').value.trim();
-    const venmo = $('venmo-input').value.trim().replace(/^@/, '');
-
+    const name = $('name-input').value.trim();
     if (!name) return showToast('Name cannot be empty', 'error');
 
     const btn = $('save-btn');
-    btn.disabled = true;
+    btn.disabled    = true;
     btn.textContent = 'Saving…';
+
+    // Normalize handles before saving
+    const cleanMethods = paymentMethods
+      .map(m => ({ type: m.type, handle: paymentNormalizeHandle(m.type, m.handle) }))
+      .filter(m => m.handle);
+
+    // Keep venmo_handle in sync for backward compat
+    const venmoMethod = cleanMethods.find(m => m.type === 'venmo');
+    const venmoHandle = venmoMethod?.handle || null;
 
     try {
       await Promise.all([
-        // Update profile table
         db.from('users').upsert({
-          phone:        user.phone,
+          phone:           user.phone,
           name,
-          venmo_handle: venmo || null,
-          updated_at:   new Date().toISOString(),
+          venmo_handle:    venmoHandle,
+          payment_methods: cleanMethods,
+          updated_at:      new Date().toISOString(),
         }, { onConflict: 'phone' }),
-        // Propagate name change to all guest rows
         db.from('guests').update({ name }).eq('phone', user.phone),
       ]);
 
@@ -107,7 +165,7 @@
     } catch (err) {
       const msg = err?.message || JSON.stringify(err);
       showToast(`Save failed: ${msg}`, 'error', 6000);
-      btn.disabled = false;
+      btn.disabled    = false;
       btn.textContent = 'Save Changes';
     }
   });
