@@ -491,14 +491,17 @@ h3 { font-size: 18px; }
   border-bottom: 1px solid var(--border);
 }
 .guest-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  display: block;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   transition: background var(--transition);
 }
 .guest-row:last-child { border-bottom: none; }
+.guest-row-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .guest-avatar {
   width: 34px; height: 34px;
   border-radius: 50%;
@@ -509,10 +512,21 @@ h3 { font-size: 18px; }
   font-weight: 600;
   flex-shrink: 0;
 }
-.guest-info    { flex: 1; min-width: 0; }
-.guest-name    { font-size: 14px; font-weight: 500; }
-.guest-phone   { font-size: 12px; color: var(--text-muted); }
-.guest-actions { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; }
+.guest-name    { flex: 1; min-width: 0; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.guest-amount  { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; flex-shrink: 0; }
+.guest-row-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding-left: 44px;
+  margin-top: 3px;
+}
+.guest-row-pills {
+  padding-left: 44px;
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
 .paid-toggle {
   font-size: 12px;
   padding: 3px 10px;
