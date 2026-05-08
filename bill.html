@@ -44,6 +44,7 @@
   <div class="owner-actions hidden" id="owner-actions">
     <button class="btn btn-secondary btn-sm" id="add-guest-btn">+ Add Guest</button>
     <button class="btn btn-secondary btn-sm" id="kiosk-btn">Pass Phone →</button>
+    <button class="btn btn-secondary btn-sm" id="edit-bill-btn">Edit Bill</button>
   </div>
 
   <!-- Kiosk claiming indicator -->
@@ -849,6 +850,7 @@
 
   // ── Kiosk + Add-Guest listeners ───────────────────────────
   $('kiosk-btn').addEventListener('click',       openKioskMode);
+  $('edit-bill-btn').addEventListener('click',  () => navigateTo(`/setup/${billId}`));
   $('kiosk-exit-btn').addEventListener('click',  exitKioskMode);
   $('kiosk-done-btn').addEventListener('click',  exitKioskGuest);
   $('add-guest-btn').addEventListener('click',   openAddGuestSheet);
@@ -1124,6 +1126,41 @@
           <button class="btn-icon" onclick="removePayer(${i})">×</button>
         </div>`;
     }).join('');
+
+    // Validation: payer totals vs bill total
+    const subtotal   = items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const itemDisc   = items.reduce((s, i) => s + (i.discount || 0) * i.quantity, 0);
+    const totalTax   = getBillTotalTax(bill);
+    const tip        = subtotal * ((bill.tip_percentage || 0) / 100);
+    const billTotal  = subtotal - itemDisc - (bill.discount_amount || 0) + totalTax + tip;
+    const payerTotal = payers.reduce((s, p) => s + (p.amount || 0), 0);
+    const allSet     = payers.length > 0 && payers.every(p => p.amount != null && p.amount > 0);
+
+    let validationEl = $('payer-validation');
+    if (!validationEl) {
+      validationEl = document.createElement('div');
+      validationEl.id = 'payer-validation';
+      $('payer-controls').insertBefore(validationEl, $('add-payer-btn'));
+    }
+
+    if (allSet) {
+      const diff = payerTotal - billTotal;
+      const absDiff = Math.abs(diff);
+      if (absDiff < 0.01) {
+        validationEl.innerHTML = `<div style="margin-top:8px;font-size:12px;color:var(--green);display:flex;align-items:center;gap:6px;">✓ Payer amounts match the bill total (${fmtFull(billTotal)})</div>`;
+      } else {
+        const direction = diff > 0 ? 'over' : 'short';
+        validationEl.innerHTML = `
+          <div style="margin-top:8px;padding:10px 12px;background:rgba(220,53,69,0.08);border:1px solid rgba(220,53,69,0.3);border-radius:var(--radius);font-size:12px;">
+            <div style="font-weight:600;color:var(--red);margin-bottom:4px;">Amounts don't match — ${fmtFull(absDiff)} ${direction}</div>
+            <div style="color:var(--text-muted);">Payer total: <strong style="color:var(--text);">${fmtFull(payerTotal)}</strong> · Bill total: <strong style="color:var(--text);">${fmtFull(billTotal)}</strong></div>
+            <div style="color:var(--text-muted);margin-top:4px;">Adjust the amounts above, or use <strong style="color:var(--text);">Edit Bill</strong> to change tip, tax, or item prices.</div>
+          </div>`;
+      }
+    } else {
+      validationEl.innerHTML = '';
+    }
+
     show($('payer-controls'));
   }
 
