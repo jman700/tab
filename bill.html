@@ -249,6 +249,7 @@
   let showConverted  = true;
   let exchangeRate   = null;
   let kioskGuest     = null;
+  let jointFormOpen  = null;   // guest id whose +1 form is open
   let pendingGuests  = [];
   let paidByPhone    = null; // who actually paid the bill (defaults to creator)
   let payerVenmo     = null; // that person's Venmo handle
@@ -454,6 +455,19 @@
       const isSynthetic  = g.phone && g.phone.startsWith('@');
       const phoneDisplay = isSynthetic ? 'Kiosk only' : Auth.formatPhone(g.phone);
 
+      const isJointActive = (g.headcount || 1) >= 2;
+      const partnerControl = isMe && bill.status !== 'closed'
+        ? isJointActive
+          ? `<button class="btn btn-ghost btn-sm" style="font-size:12px;color:var(--text-muted);" onclick="resetJointEntry('${g.id}')">Party of 2 ✕</button>`
+          : jointFormOpen === g.id
+            ? `<div class="joint-form" style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap;">
+                 <input id="joint-name-input" class="input" style="font-size:13px;padding:6px 10px;min-width:160px;flex:1;" placeholder="e.g. Antonio &amp; Maria" value="${escHtml(g.name)} &amp; " />
+                 <button class="btn btn-primary btn-sm" onclick="saveJointEntry('${g.id}')">Save</button>
+                 <button class="btn btn-ghost btn-sm" onclick="cancelJointForm()">Cancel</button>
+               </div>`
+            : `<button class="btn btn-ghost btn-sm" style="font-size:12px;" onclick="openJointForm('${g.id}')">+1 Partner</button>`
+        : '';
+
       return `
         <div class="guest-row" id="guest-${g.id}">
           <div class="guest-avatar" style="background:${color}22;color:${color};border:1.5px solid ${color}44;">
@@ -470,6 +484,7 @@
               ${removeBtn}
             </div>
             ${claimForBtn}
+            ${partnerControl}
           </div>
         </div>
       `;
@@ -586,6 +601,56 @@
       el.style.color = total > 0 ? 'var(--accent)' : 'var(--text-muted)';
     }
     setText('footer-label', kioskGuest ? `${kioskGuest.name}'s Total` : 'Your Total');
+  }
+
+  // ── Joint Entry ───────────────────────────────────────────
+  function openJointForm(guestId) {
+    jointFormOpen = guestId;
+    renderGuests();
+    setTimeout(() => {
+      const input = document.getElementById('joint-name-input');
+      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+    }, 50);
+  }
+
+  function cancelJointForm() {
+    jointFormOpen = null;
+    renderGuests();
+  }
+
+  async function saveJointEntry(guestId) {
+    const input = document.getElementById('joint-name-input');
+    const name  = input ? input.value.trim() : '';
+    if (!name) { showToast('Enter a name for your party', 'error'); return; }
+
+    const { error } = await db
+      .from('guests')
+      .update({ name, headcount: 2 })
+      .eq('id', guestId);
+
+    if (error) { showToast('Could not save — try again', 'error'); return; }
+
+    const idx = guests.findIndex(g => g.id === guestId);
+    if (idx >= 0) { guests[idx].name = name; guests[idx].headcount = 2; }
+    jointFormOpen = null;
+    renderGuests();
+    renderSummary();
+  }
+
+  async function resetJointEntry(guestId) {
+    const originalName = user.name;
+
+    const { error } = await db
+      .from('guests')
+      .update({ name: originalName, headcount: 1 })
+      .eq('id', guestId);
+
+    if (error) { showToast('Could not reset — try again', 'error'); return; }
+
+    const idx = guests.findIndex(g => g.id === guestId);
+    if (idx >= 0) { guests[idx].name = originalName; guests[idx].headcount = 1; }
+    renderGuests();
+    renderSummary();
   }
 
   // ── Claim Toggle ──────────────────────────────────────────
