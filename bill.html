@@ -1421,11 +1421,18 @@
           const rawAmt    = showDual && exchangeRate ? p.amount * exchangeRate : p.amount;
           const amtStr    = display(rawAmt);
           return `
-            <div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--border);">
-              <span style="font-size:13px;font-weight:500;color:${fromColor};flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(fromName)}</span>
-              <span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">pays</span>
-              <span style="font-size:13px;font-weight:500;color:${toColor};flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center;">${escHtml(toName)}${toVenmo ? `<br><span style="font-size:10px;color:var(--text-muted);font-weight:400;">@${escHtml(toVenmo)}</span>` : ''}</span>
-              <span style="font-size:13px;font-weight:600;color:var(--text);flex-shrink:0;text-align:right;">${amtStr}</span>
+            <div style="padding:10px 0;border-bottom:1px solid var(--border);">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div style="width:28px;height:28px;border-radius:50%;background:${fromColor}22;color:${fromColor};border:1.5px solid ${fromColor}44;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0;">${getInitials(fromName)}</div>
+                <span style="font-size:13px;font-weight:500;color:${fromColor};flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(fromName)}</span>
+                <span style="font-size:13px;font-weight:600;color:var(--text);flex-shrink:0;">${amtStr}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding-left:36px;">
+                <span style="font-size:11px;color:var(--text-muted);">pays →</span>
+                <div style="width:24px;height:24px;border-radius:50%;background:${toColor}22;color:${toColor};border:1.5px solid ${toColor}44;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;flex-shrink:0;">${getInitials(toName)}</div>
+                <span style="font-size:13px;font-weight:500;color:${toColor};flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(toName)}</span>
+                ${toVenmo ? `<span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">@${escHtml(toVenmo)}</span>` : ''}
+              </div>
             </div>`;
         }).join('');
         setHTML('payment-breakdown', `
