@@ -187,9 +187,13 @@ function getPersonShare(phone, claims, items, guests, bill) {
     if (bill.tip_split_type === 'proportional') {
       total += tipTotal * shareRatio;
     } else {
-      // Equal split: only among guests who actually claimed something
-      const activeGuests = new Set(claims.map(c => c.guest_phone)).size;
-      total += tipTotal / Math.max(1, activeGuests);
+      // Equal split: weight by headcount; only among guests who actually claimed something
+      const activePhones  = new Set(claims.map(c => c.guest_phone));
+      const totalHeads    = guests
+        .filter(g => activePhones.has(g.phone))
+        .reduce((sum, g) => sum + (g.headcount || 1), 0);
+      const myHeadcount   = (guests.find(g => g.phone === phone)?.headcount) || 1;
+      total += (tipTotal / Math.max(1, totalHeads)) * myHeadcount;
     }
   }
 
