@@ -152,6 +152,7 @@
   <div id="summary-list"></div>
   <hr class="summary-divider" />
   <div id="summary-totals"></div>
+  <div id="payment-breakdown"></div>
   <div id="venmo-pay-wrap"></div>
   <button class="btn btn-primary btn-full mt-16" id="close-summary-btn">Done</button>
 </div>
@@ -1227,14 +1228,16 @@
       const localLine = showDual
         ? `<div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${fmtCurrency(share, billCurrency)}</div>`
         : '';
-      const paidBadge = g.has_paid || isPayer
-        ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px;">${isPayer ? 'Paid bill' : '✓ Paid'}</div>`
+      const paidBadge = isPayer
+        ? `<div style="margin-top:4px;"><span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:var(--accent-light);color:var(--accent);border:1px solid rgba(184,135,42,0.35);">Paid bill</span></div>`
+        : g.has_paid
+        ? `<div style="font-size:11px;color:var(--green);margin-top:3px;">✓ Paid</div>`
         : '';
       const markPaidBtn = isOwner && !isMe && !isPayer && share > 0
         ? `<button class="paid-toggle ${g.has_paid ? 'paid' : ''}" onclick="togglePaid('${g.id}', ${!g.has_paid})" style="margin-top:6px;font-size:11px;padding:2px 8px;">${g.has_paid ? '✓ Paid' : 'Mark paid'}</button>`
         : '';
       return `
-        <div class="summary-row" style="${g.has_paid || isPayer ? 'opacity:0.6;' : ''}">
+        <div class="summary-row" style="${g.has_paid && !isPayer ? 'opacity:0.6;' : ''}">
           <div class="summary-avatar" style="background:${color}22;color:${color};border:2px solid ${color}44;">
             ${getInitials(g.name)}
           </div>
@@ -1287,6 +1290,41 @@
         <span class="val">${dualAmt(computed)}</span>
       </div>
     `);
+
+    // ── Payment breakdown — visible to everyone ───────────────
+    const hasAmountsForBreakdown = payers.length > 0 && payers.every(p => p.amount != null && p.amount > 0);
+    if (hasAmountsForBreakdown) {
+      const settlements = settleDebts();
+      if (settlements.length > 0) {
+        const rows = settlements.map(p => {
+          const fromIdx   = guests.findIndex(g => g.phone === p.from);
+          const toIdx     = guests.findIndex(g => g.phone === p.to);
+          const fromName  = fromIdx >= 0 ? guests[fromIdx].name : p.from;
+          const toName    = toIdx   >= 0 ? guests[toIdx].name   : p.to;
+          const fromColor = getPersonColor(fromIdx >= 0 ? fromIdx : 0);
+          const toColor   = getPersonColor(toIdx   >= 0 ? toIdx   : 0);
+          const toVenmo   = payerProfiles[p.to]?.venmo_handle;
+          const rawAmt    = showDual && exchangeRate ? p.amount * exchangeRate : p.amount;
+          const amtStr    = display(rawAmt);
+          return `
+            <div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--border);">
+              <span style="font-size:13px;font-weight:500;color:${fromColor};flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(fromName)}</span>
+              <span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">pays</span>
+              <span style="font-size:13px;font-weight:500;color:${toColor};flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center;">${escHtml(toName)}${toVenmo ? `<br><span style="font-size:10px;color:var(--text-muted);font-weight:400;">@${escHtml(toVenmo)}</span>` : ''}</span>
+              <span style="font-size:13px;font-weight:600;color:var(--text);flex-shrink:0;text-align:right;">${amtStr}</span>
+            </div>`;
+        }).join('');
+        setHTML('payment-breakdown', `
+          <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px;">
+            <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Who pays who</div>
+            ${rows}
+          </div>`);
+      } else {
+        setHTML('payment-breakdown', '');
+      }
+    } else {
+      setHTML('payment-breakdown', '');
+    }
 
     // Payment instructions — who does the current user owe, and how much?
     const myShare     = getPersonShare(user.phone, claims, items, guests, bill);
