@@ -158,9 +158,14 @@ function getPersonShare(phone, claims, items, guests, bill) {
     seen.add(key);
     const item = itemMap[c.item_id];
     if (!item) continue;
-    const effectivePrice = item.price - (item.discount || 0);
-    const unitClaims = claims.filter(x => x.item_id === c.item_id && x.unit_index === c.unit_index);
-    mySubtotal += effectivePrice / unitClaims.length;
+    const effectivePrice  = item.price - (item.discount || 0);
+    const unitClaims      = claims.filter(x => x.item_id === c.item_id && x.unit_index === c.unit_index);
+    const totalUnitHeads  = unitClaims.reduce((sum, x) => {
+      const g = guests.find(gg => gg.phone === x.guest_phone);
+      return sum + (g?.headcount || 1);
+    }, 0);
+    const myHeadcount     = guests.find(g => g.phone === phone)?.headcount || 1;
+    mySubtotal += effectivePrice * myHeadcount / Math.max(1, totalUnitHeads);
   }
 
   if (mySubtotal === 0) return 0;

@@ -458,14 +458,14 @@
       const isJointActive = (g.headcount || 1) >= 2;
       const partnerControl = isMe && bill.status !== 'closed'
         ? isJointActive
-          ? `<button class="btn btn-ghost btn-sm" style="font-size:12px;color:var(--text-muted);" onclick="resetJointEntry('${g.id}')">Party of 2 ✕</button>`
+          ? `<button class="claim-for-btn" onclick="resetJointEntry('${g.id}')">Party of 2 ✕</button>`
           : jointFormOpen === g.id
             ? `<div class="joint-form" style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap;">
                  <input id="joint-name-input" class="input" style="font-size:13px;padding:6px 10px;min-width:160px;flex:1;" placeholder="e.g. Antonio &amp; Maria" value="${escHtml(g.name)} &amp; " />
                  <button class="btn btn-primary btn-sm" onclick="saveJointEntry('${g.id}')">Save</button>
                  <button class="btn btn-ghost btn-sm" onclick="cancelJointForm()">Cancel</button>
                </div>`
-            : `<button class="btn btn-ghost btn-sm" style="font-size:12px;" onclick="openJointForm('${g.id}')">+1 Partner</button>`
+            : `<button class="claim-for-btn" onclick="openJointForm('${g.id}')">+1 Partner</button>`
         : '';
 
       return `
