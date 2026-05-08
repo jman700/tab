@@ -511,8 +511,13 @@
         const isMine     = unitClaims.some(c => c.guest_phone === activePhone);
 
         if (isEmpty) unclaimedCount++;
-        const effectivePrice = item.price - (item.discount || 0);
-        if (isMine)  myItemShare += effectivePrice / unitClaims.length;
+        const effectivePrice    = item.price - (item.discount || 0);
+        const totalUnitHeads    = unitClaims.reduce((sum, x) => {
+          const g = guests.find(gg => gg.phone === x.guest_phone);
+          return sum + (g?.headcount || 1);
+        }, 0);
+        const myGuestHeadcount  = (myGuest?.headcount || 1);
+        if (isMine) myItemShare += effectivePrice * myGuestHeadcount / Math.max(1, totalUnitHeads);
 
 
         const avatars = unitClaims.map(c => {
