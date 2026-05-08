@@ -455,10 +455,11 @@
       const isSynthetic  = g.phone && g.phone.startsWith('@');
       const phoneDisplay = isSynthetic ? 'Kiosk only' : Auth.formatPhone(g.phone);
 
-      const isJointActive = (g.headcount || 1) >= 2;
-      const partnerControl = isMe && bill.status !== 'closed'
+      const isJointActive      = (g.headcount || 1) >= 2;
+      const canManagePartner   = (isMe || isOwner) && bill.status !== 'closed';
+      const partnerControl = canManagePartner
         ? isJointActive
-          ? `<button class="claim-for-btn" onclick="resetJointEntry('${g.id}')">Party of 2 ✕</button>`
+          ? `<button class="claim-for-btn" onclick="resetJointEntry('${g.id}','${g.phone}')">Party of 2 ✕</button>`
           : jointFormOpen === g.id
             ? `<div class="joint-form" style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap;">
                  <input id="joint-name-input" class="input" style="font-size:13px;padding:6px 10px;min-width:160px;flex:1;" placeholder="e.g. Antonio &amp; Maria" value="${escHtml(g.name)} &amp; " />
@@ -639,11 +640,15 @@
     if (idx >= 0) { guests[idx].name = name; guests[idx].headcount = 2; }
     jointFormOpen = null;
     renderGuests();
+    renderItems();
     renderSummary();
   }
 
-  async function resetJointEntry(guestId) {
-    const originalName = user.name;
+  async function resetJointEntry(guestId, guestPhone) {
+    const g            = guests.find(x => x.id === guestId);
+    const originalName = guestPhone === user.phone
+      ? user.name
+      : (g?.name || '').split(' & ')[0] || g?.name || '';
 
     const { error } = await db
       .from('guests')
@@ -652,9 +657,10 @@
 
     if (error) { showToast('Could not reset — try again', 'error'); return; }
 
-    const idx = guests.findIndex(g => g.id === guestId);
+    const idx = guests.findIndex(x => x.id === guestId);
     if (idx >= 0) { guests[idx].name = originalName; guests[idx].headcount = 1; }
     renderGuests();
+    renderItems();
     renderSummary();
   }
 
