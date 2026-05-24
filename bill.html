@@ -1642,11 +1642,7 @@
     } else {
       hide($('import-group-btn'));
     }
-    if ('contacts' in navigator && navigator.contacts) {
-      show($('import-contacts-btn'));
-    } else {
-      hide($('import-contacts-btn'));
-    }
+    show($('import-contacts-btn'));
     openSheet('add-guest-backdrop', 'add-guest-sheet');
   }
 
@@ -1688,6 +1684,10 @@
   }
 
   async function importContacts() {
+    if (!('contacts' in navigator) || !navigator.contacts) {
+      showToast('Contact picker not supported on this browser. Use iOS Safari or Chrome on Android.', 'error');
+      return;
+    }
     try {
       const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
       if (!contacts || contacts.length === 0) return;
