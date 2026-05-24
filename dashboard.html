@@ -189,35 +189,6 @@
     }
   }
 
-  // ── Compute share for a bill card preview ────────────────
-  // Fetches all claims (not just mine) so split ratios are accurate.
-  async function getMyShare(billId) {
-    const [{ data: allClaims }, { data: items }] = await Promise.all([
-      db.from('claims').select('*').eq('bill_id', billId),
-      db.from('items').select('*').eq('bill_id', billId),
-    ]);
-
-    if (!allClaims || !items) return 0;
-
-    const myClaims = allClaims.filter(c => c.guest_phone === user.phone);
-    if (myClaims.length === 0) return 0;
-
-    const itemMap = Object.fromEntries(items.map(i => [i.id, i]));
-    const seen    = new Set();
-    let total     = 0;
-
-    for (const c of myClaims) {
-      const key = `${c.item_id}-${c.unit_index}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const item = itemMap[c.item_id];
-      if (!item) continue;
-      const unitClaims = allClaims.filter(x => x.item_id === c.item_id && x.unit_index === c.unit_index);
-      total += item.price / unitClaims.length;
-    }
-    return total;
-  }
-
   // ── Render ───────────────────────────────────────────────
   async function renderDashboard(allBills, ownedBills) {
     const active = allBills.filter(b => b.status === 'active' || b.status === 'setup');
@@ -264,12 +235,17 @@
   }
 
   async function renderBillCard(bill, ownedBills) {
-    const isOwner    = ownedBills.some(b => b.id === bill.id);
-    const [myShare, guestsRes] = await Promise.all([
-      getMyShare(bill.id),
-      db.from('guests').select('id').eq('bill_id', bill.id),
+    const isOwner = ownedBills.some(b => b.id === bill.id);
+    const [claimsRes, itemsRes, guestsRes] = await Promise.all([
+      db.from('claims').select('*').eq('bill_id', bill.id),
+      db.from('items').select('*').eq('bill_id', bill.id),
+      db.from('guests').select('*').eq('bill_id', bill.id),
     ]);
-    const guestCount = (guestsRes.data || []).length;
+    const allClaims = claimsRes.data || [];
+    const items     = itemsRes.data  || [];
+    const guests    = guestsRes.data || [];
+    const guestCount = guests.length;
+    const myShare = getPersonShare(user.phone, allClaims, items, guests, bill);
 
     const badgeClass = bill.status === 'active' ? 'badge-active'
                      : bill.status === 'setup'  ? 'badge-setup'

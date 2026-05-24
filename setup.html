@@ -58,6 +58,7 @@
       <div class="spinner"></div>
       Scanning receipt with AI…
     </div>
+    <button class="btn btn-ghost btn-sm mt-8" id="skip-receipt-btn" style="color:var(--text-muted);font-size:13px;">Skip — add items manually</button>
   </div>
 
   <!-- Step 3: Items -->
@@ -310,6 +311,10 @@
 
     $('scan-btn').addEventListener('click', scanReceipt);
     $('add-photo-btn').addEventListener('click', () => $('receipt-input').click());
+    $('skip-receipt-btn').addEventListener('click', () => {
+      hide($('skip-receipt-btn'));
+      showPostUploadSections();
+    });
 
     $('add-item-btn').addEventListener('click', addBlankItem);
 
@@ -771,6 +776,7 @@
   function showPostUploadSections() {
     ['items-section', 'tax-section', 'discount-section', 'tip-section', 'totals-panel', 'publish-btn']
       .forEach(id => show($(id)));
+    hide($('skip-receipt-btn'));
     renderTaxRows();
   }
 
