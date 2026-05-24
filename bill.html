@@ -1642,7 +1642,11 @@
     } else {
       hide($('import-group-btn'));
     }
-    show($('import-contacts-btn'));
+    if ('contacts' in navigator && navigator.contacts) {
+      show($('import-contacts-btn'));
+    } else {
+      hide($('import-contacts-btn'));
+    }
     openSheet('add-guest-backdrop', 'add-guest-sheet');
   }
 
