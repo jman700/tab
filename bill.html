@@ -1587,27 +1587,41 @@
       const color  = getPersonColor(gi);
       const share  = getPersonShare(g.phone, claims, items, guests, bill);
       const myClaims = claims.filter(c => c.guest_phone === g.phone);
-      const seen = new Set();
-      const claimedItems = [];
+
+      // Group by item_id so we can show ×N quantity and ÷N split badges
+      const itemMap = {};
       for (const c of myClaims) {
-        const key = `${c.item_id}-${c.unit_index}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const item = items.find(i => i.id === c.item_id);
+        if (!itemMap[c.item_id]) itemMap[c.item_id] = new Set();
+        itemMap[c.item_id].add(c.unit_index);
+      }
+      const claimedItems = [];
+      for (const [itemId, unitIndexSet] of Object.entries(itemMap)) {
+        const item = items.find(i => i.id === itemId);
         if (!item) continue;
-        const unitClaims = claims.filter(x => x.item_id === c.item_id && x.unit_index === c.unit_index).length;
-        const rawPrice = (item.price - (item.discount || 0)) / unitClaims;
-        claimedItems.push({ name: item.name, price: rawPrice, split: unitClaims > 1 });
+        const unitsOwned = unitIndexSet.size;
+        let totalPrice = 0, maxSplit = 1;
+        for (const ui of unitIndexSet) {
+          const splitCount = claims.filter(x => x.item_id === itemId && x.unit_index === ui).length;
+          maxSplit = Math.max(maxSplit, splitCount);
+          totalPrice += (item.price - (item.discount || 0)) / splitCount;
+        }
+        claimedItems.push({ name: item.name, price: totalPrice, unitsOwned, maxSplit });
       }
 
       const isCovered = !!g.covered_by_phone;
       const itemRows = claimedItems.length > 0
-        ? claimedItems.map(ci => `
-            <div style="display:flex;justify-content:space-between;align-items:baseline;padding:4px 0 4px 44px;border-bottom:1px solid var(--border);">
-              <span style="font-size:13px;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(ci.name)}${ci.split ? ' <span style="font-size:10px;color:var(--text-muted);">(split)</span>' : ''}</span>
+        ? claimedItems.map(ci => {
+            let badge = '';
+            if (ci.unitsOwned > 1 && ci.maxSplit > 1) badge = `×${ci.unitsOwned} ÷${ci.maxSplit}`;
+            else if (ci.unitsOwned > 1) badge = `×${ci.unitsOwned}`;
+            else if (ci.maxSplit > 1) badge = `÷${ci.maxSplit}`;
+            return `
+            <div style="display:flex;justify-content:space-between;align-items:baseline;padding:4px 12px 4px 44px;border-bottom:1px solid var(--border);">
+              <span style="font-size:13px;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(ci.name)}${badge ? ` <span style="font-size:10px;color:var(--text-muted);">${badge}</span>` : ''}</span>
               <span style="font-size:13px;font-weight:500;flex-shrink:0;margin-left:12px;">${money(ci.price)}</span>
-            </div>`).join('')
-        : `<div style="padding:6px 0 6px 44px;font-size:13px;color:var(--text-muted);">No items claimed</div>`;
+            </div>`;
+          }).join('')
+        : `<div style="padding:6px 12px 6px 44px;font-size:13px;color:var(--text-muted);">No items claimed</div>`;
 
       return `
         <div style="margin-bottom:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;${isCovered ? 'opacity:0.6;' : ''}">
@@ -1637,16 +1651,24 @@
       const color  = getPersonColor(gi);
       const share  = getPersonShare(g.phone, claims, items, guests, bill);
       const myClaims = claims.filter(c => c.guest_phone === g.phone);
-      const seen = new Set();
-      const claimedItems = [];
+      // Group by item_id for quantity/split badges
+      const itemMap = {};
       for (const c of myClaims) {
-        const key = `${c.item_id}-${c.unit_index}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const item = items.find(i => i.id === c.item_id);
+        if (!itemMap[c.item_id]) itemMap[c.item_id] = new Set();
+        itemMap[c.item_id].add(c.unit_index);
+      }
+      const claimedItems = [];
+      for (const [itemId, unitIndexSet] of Object.entries(itemMap)) {
+        const item = items.find(i => i.id === itemId);
         if (!item) continue;
-        const unitClaims = claims.filter(x => x.item_id === c.item_id && x.unit_index === c.unit_index).length;
-        claimedItems.push({ name: item.name, price: (item.price - (item.discount || 0)) / unitClaims, split: unitClaims > 1 });
+        const unitsOwned = unitIndexSet.size;
+        let totalPrice = 0, maxSplit = 1;
+        for (const ui of unitIndexSet) {
+          const splitCount = claims.filter(x => x.item_id === itemId && x.unit_index === ui).length;
+          maxSplit = Math.max(maxSplit, splitCount);
+          totalPrice += (item.price - (item.discount || 0)) / splitCount;
+        }
+        claimedItems.push({ name: item.name, price: totalPrice, unitsOwned, maxSplit });
       }
       return { name: g.name, color, share, claimedItems };
     });
@@ -1729,7 +1751,11 @@
         y += 20;
       } else {
         gd.claimedItems.forEach(ci => {
-          const label = ci.split ? `${ci.name} (split)` : ci.name;
+          let badge = '';
+          if (ci.unitsOwned > 1 && ci.maxSplit > 1) badge = ` ×${ci.unitsOwned} ÷${ci.maxSplit}`;
+          else if (ci.unitsOwned > 1) badge = ` ×${ci.unitsOwned}`;
+          else if (ci.maxSplit > 1) badge = ` ÷${ci.maxSplit}`;
+          const label = ci.name + badge;
           draw(trunc(label, IW - 80, mono(10)), P + 8, y + 14, mono(10), INK);
           draw(money(ci.price), W - P, y + 14, mono(10), MUTED, 'right');
           y += 20;
