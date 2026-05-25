@@ -149,13 +149,28 @@
 <div class="sheet-backdrop" id="summary-backdrop" style="display:none;"></div>
 <div class="sheet" id="summary-sheet" style="display:none;">
   <div class="sheet-handle"></div>
-  <h2>Bill Summary</h2>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+    <h2 style="margin:0;">Bill Summary</h2>
+    <button class="btn btn-secondary btn-sm hidden" id="save-breakdown-btn" style="font-size:12px;padding:5px 11px;">⬇ Save</button>
+  </div>
   <p class="sheet-meta" id="summary-meta"></p>
-  <div id="summary-list"></div>
-  <hr class="summary-divider" />
-  <div id="summary-totals"></div>
-  <div id="payment-breakdown"></div>
-  <div id="venmo-pay-wrap"></div>
+  <!-- Tabs -->
+  <div class="toggle-group" style="margin-bottom:14px;">
+    <button class="toggle-btn active" id="summary-tab-overview">Overview</button>
+    <button class="toggle-btn" id="summary-tab-breakdown">Breakdown</button>
+  </div>
+  <!-- Overview panel -->
+  <div id="summary-overview-panel">
+    <div id="summary-list"></div>
+    <hr class="summary-divider" />
+    <div id="summary-totals"></div>
+    <div id="payment-breakdown"></div>
+    <div id="venmo-pay-wrap"></div>
+  </div>
+  <!-- Breakdown panel -->
+  <div id="summary-breakdown-panel" style="display:none;">
+    <div id="breakdown-list"></div>
+  </div>
   <button class="btn btn-primary btn-full mt-16" id="close-summary-btn">Done</button>
 </div>
 
@@ -1301,11 +1316,40 @@
 
   // ── Summary Sheet ─────────────────────────────────────────
   $('summary-btn').addEventListener('click', () => {
+    // Always open on Overview tab
+    switchSummaryTab('overview');
     renderSummary();
     openSheet('summary-backdrop', 'summary-sheet');
   });
   $('close-summary-btn').addEventListener('click', () => closeSheet('summary-backdrop', 'summary-sheet'));
   $('summary-backdrop').addEventListener('click',  () => closeSheet('summary-backdrop', 'summary-sheet'));
+
+  $('summary-tab-overview').addEventListener('click', () => switchSummaryTab('overview'));
+  $('summary-tab-breakdown').addEventListener('click', () => { switchSummaryTab('breakdown'); renderBreakdown(); });
+
+  $('save-breakdown-btn').addEventListener('click', () => {
+    const canvas = buildBreakdownCanvas();
+    const fileName = `${bill.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-breakdown.png`;
+    canvas.toBlob(async blob => {
+      if (navigator.share && navigator.canShare?.({ files: [new File([blob], fileName, { type: 'image/png' })] })) {
+        try { await navigator.share({ files: [new File([blob], fileName, { type: 'image/png' })], title: bill.name }); return; }
+        catch (e) { if (e.name === 'AbortError') return; }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, 'image/png');
+  });
+
+  function switchSummaryTab(tab) {
+    const isBreakdown = tab === 'breakdown';
+    $('summary-tab-overview').classList.toggle('active', !isBreakdown);
+    $('summary-tab-breakdown').classList.toggle('active', isBreakdown);
+    $('summary-overview-panel').style.display  = isBreakdown ? 'none' : '';
+    $('summary-breakdown-panel').style.display = isBreakdown ? '' : 'none';
+    if (isBreakdown) show($('save-breakdown-btn')); else hide($('save-breakdown-btn'));
+  }
 
   function renderSummary() {
     const subtotal    = items.reduce((s, i) => s + i.price * i.quantity, 0);
@@ -1530,6 +1574,177 @@
       // No amounts set yet — fall back to single-payer mode using myShare
       setHTML('venmo-pay-wrap', `<div style="margin-top:20px;">${paymentCard(payers[0].phone, myShare)}</div>`);
     }
+  }
+
+  // ── Breakdown Tab ─────────────────────────────────────────
+  function renderBreakdown() {
+    const converting = showConverted && exchangeRate;
+    const currency   = converting ? 'USD' : (bill.currency || 'USD');
+    const conv       = n => converting ? (n || 0) * exchangeRate : (n || 0);
+    const money      = n => fmtCurrency(conv(n), currency);
+
+    const html = guests.map((g, gi) => {
+      const color  = getPersonColor(gi);
+      const share  = getPersonShare(g.phone, claims, items, guests, bill);
+      const myClaims = claims.filter(c => c.guest_phone === g.phone);
+      const seen = new Set();
+      const claimedItems = [];
+      for (const c of myClaims) {
+        const key = `${c.item_id}-${c.unit_index}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const item = items.find(i => i.id === c.item_id);
+        if (!item) continue;
+        const unitClaims = claims.filter(x => x.item_id === c.item_id && x.unit_index === c.unit_index).length;
+        const rawPrice = (item.price - (item.discount || 0)) / unitClaims;
+        claimedItems.push({ name: item.name, price: rawPrice, split: unitClaims > 1 });
+      }
+
+      const isCovered = !!g.covered_by_phone;
+      const itemRows = claimedItems.length > 0
+        ? claimedItems.map(ci => `
+            <div style="display:flex;justify-content:space-between;align-items:baseline;padding:4px 0 4px 44px;border-bottom:1px solid var(--border);">
+              <span style="font-size:13px;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(ci.name)}${ci.split ? ' <span style="font-size:10px;color:var(--text-muted);">(split)</span>' : ''}</span>
+              <span style="font-size:13px;font-weight:500;flex-shrink:0;margin-left:12px;">${money(ci.price)}</span>
+            </div>`).join('')
+        : `<div style="padding:6px 0 6px 44px;font-size:13px;color:var(--text-muted);">No items claimed</div>`;
+
+      return `
+        <div style="margin-bottom:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;${isCovered ? 'opacity:0.6;' : ''}">
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:${color}0D;">
+            <div style="width:34px;height:34px;border-radius:50%;background:${color}22;color:${color};border:1.5px solid ${color}44;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;">${getInitials(g.name)}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:14px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(g.name)}</div>
+              <div style="font-size:11px;color:var(--text-muted);">${claimedItems.length} item${claimedItems.length !== 1 ? 's' : ''}</div>
+            </div>
+            <div style="font-size:15px;font-weight:700;color:${color};flex-shrink:0;">${money(share)}</div>
+          </div>
+          ${itemRows}
+        </div>`;
+    }).join('');
+
+    setHTML('breakdown-list', html || '<p style="color:var(--text-muted);font-size:14px;">No guests yet.</p>');
+  }
+
+  function buildBreakdownCanvas() {
+    const converting = showConverted && exchangeRate;
+    const currency   = converting ? 'USD' : (bill.currency || 'USD');
+    const conv       = n => converting ? (n || 0) * exchangeRate : (n || 0);
+    const money      = n => fmtCurrency(conv(n), currency);
+
+    // Build per-guest item lists
+    const guestData = guests.map((g, gi) => {
+      const color  = getPersonColor(gi);
+      const share  = getPersonShare(g.phone, claims, items, guests, bill);
+      const myClaims = claims.filter(c => c.guest_phone === g.phone);
+      const seen = new Set();
+      const claimedItems = [];
+      for (const c of myClaims) {
+        const key = `${c.item_id}-${c.unit_index}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const item = items.find(i => i.id === c.item_id);
+        if (!item) continue;
+        const unitClaims = claims.filter(x => x.item_id === c.item_id && x.unit_index === c.unit_index).length;
+        claimedItems.push({ name: item.name, price: (item.price - (item.discount || 0)) / unitClaims, split: unitClaims > 1 });
+      }
+      return { name: g.name, color, share, claimedItems };
+    });
+
+    const W = 360, P = 20, IW = W - P * 2, DPR = 2;
+    const INK = '#1C1208', MUTED = '#8A7A6A', ACCENT = '#B8872A', LINE = '#D4C9B8';
+    const sans = (sz, bold) => `${bold ? '600 ' : ''}${sz}px -apple-system,BlinkMacSystemFont,sans-serif`;
+    const mono = sz => `${sz}px "Courier New",Courier,monospace`;
+
+    // Calculate height
+    let h = P + 28 + 12 + 2 + 12;  // header
+    h += 18 + 16 + 12 + 2 + 12;    // bill name + date
+    guestData.forEach(gd => {
+      h += 36 + 8;  // person header row
+      h += Math.max(gd.claimedItems.length, 1) * 20 + 8;  // items
+    });
+    h += 16 + P;  // footer
+
+    const canvas = document.createElement('canvas');
+    canvas.width  = W * DPR;
+    canvas.height = h * DPR;
+    canvas.style.width = '100%';
+    canvas.style.maxWidth = W + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.scale(DPR, DPR);
+
+    ctx.fillStyle = '#FDFBF6';
+    ctx.fillRect(0, 0, W, h);
+
+    function draw(text, x, y_, font, color, align = 'left') {
+      ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align;
+      ctx.fillText(String(text), x, y_);
+    }
+    function trunc(text, maxW, font) {
+      ctx.font = font;
+      if (ctx.measureText(text).width <= maxW) return text;
+      let t = text;
+      while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+      return t + '…';
+    }
+    const thickLine = y_ => { ctx.fillStyle = ACCENT; ctx.fillRect(P, y_, IW, 2); };
+    const thinLine  = y_ => { ctx.fillStyle = LINE;   ctx.fillRect(P, y_, IW, 1); };
+
+    let y = P;
+
+    // Brand
+    draw('tab', P, y + 20, sans(20, true), ACCENT);
+    draw('breakdown', W - P, y + 20, sans(10, false), MUTED, 'right');
+    y += 28; y += 12; thickLine(y); y += 2 + 12;
+
+    // Bill name + date
+    draw(trunc(bill.name, IW, sans(13, true)), W / 2, y + 14, sans(13, true), INK, 'center'); y += 18;
+    draw(formatDate(bill.created_at), W / 2, y + 12, sans(10, false), MUTED, 'center'); y += 16;
+    y += 12; thickLine(y); y += 2 + 12;
+
+    // Per-person sections
+    guestData.forEach((gd, i) => {
+      // Tinted header bar
+      ctx.fillStyle = gd.color + '18';
+      ctx.fillRect(P, y, IW, 30);
+
+      // Avatar circle
+      ctx.fillStyle = gd.color + '33';
+      ctx.beginPath(); ctx.arc(P + 14, y + 15, 11, 0, Math.PI * 2); ctx.fill();
+      const initials = getInitials(gd.name);
+      draw(initials, P + 14, y + 19, sans(8, true), gd.color, 'center');
+
+      // Name
+      draw(trunc(gd.name, IW - 90, sans(12, true)), P + 30, y + 12, sans(12, true), INK);
+      // Item count
+      draw(`${gd.claimedItems.length} item${gd.claimedItems.length !== 1 ? 's' : ''}`, P + 30, y + 24, sans(9, false), MUTED);
+      // Total
+      draw(money(gd.share), W - P, y + 19, sans(13, true), gd.color, 'right');
+
+      y += 36;
+
+      // Item rows
+      if (gd.claimedItems.length === 0) {
+        draw('No items claimed', P + 8, y + 14, sans(10, false), MUTED);
+        y += 20;
+      } else {
+        gd.claimedItems.forEach(ci => {
+          const label = ci.split ? `${ci.name} (split)` : ci.name;
+          draw(trunc(label, IW - 80, mono(10)), P + 8, y + 14, mono(10), INK);
+          draw(money(ci.price), W - P, y + 14, mono(10), MUTED, 'right');
+          y += 20;
+        });
+      }
+
+      if (i < guestData.length - 1) { thinLine(y + 4); y += 12; }
+      else y += 8;
+    });
+
+    // Footer
+    y += 8; thinLine(y); y += 8;
+    draw('tab.app', W / 2, y + 10, sans(9, false), MUTED, 'center');
+
+    return canvas;
   }
 
   // ── Realtime ──────────────────────────────────────────────
