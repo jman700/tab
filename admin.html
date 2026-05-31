@@ -42,6 +42,19 @@
   </div>
 </main>
 
+<!-- Profile Sheet -->
+<div class="sheet-backdrop" id="profile-backdrop" style="display:none;"></div>
+<div class="sheet" id="profile-sheet" style="display:none;">
+  <div class="sheet-handle"></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <h2 style="margin:0;" id="profile-title">User</h2>
+    <button class="btn btn-secondary btn-sm" id="profile-edit-btn">Edit</button>
+  </div>
+  <div id="profile-meta" style="margin-bottom:16px;"></div>
+  <div id="profile-body"></div>
+  <button class="btn btn-ghost btn-full mt-12" id="profile-close-btn">Close</button>
+</div>
+
 <!-- Edit Sheet (accounts + guests) -->
 <div class="sheet-backdrop" id="edit-backdrop" style="display:none;"></div>
 <div class="sheet" id="edit-sheet" style="display:none;">
@@ -156,7 +169,7 @@
       html += '<div class="empty" style="margin-bottom:24px;"><p>No accounts found.</p></div>';
     } else {
       html += users.map(u => `
-        <div class="bill-card" style="cursor:pointer;" onclick="openEdit('${escHtml(u.phone)}', false)">
+        <div class="bill-card" style="cursor:pointer;" onclick="openProfile('${escHtml(u.phone)}', false)">
           <div class="bill-card-top">
             <div>
               <div class="bill-card-name">${escHtml(u.name)}</div>
@@ -185,7 +198,7 @@
       html += '<div class="empty"><p>No guest-only users found.</p></div>';
     } else {
       html += guests.map(g => `
-        <div class="bill-card" style="cursor:pointer;" onclick="openEdit('${escHtml(g.phone)}', true)">
+        <div class="bill-card" style="cursor:pointer;" onclick="openProfile('${escHtml(g.phone)}', true)">
           <div class="bill-card-top">
             <div>
               <div class="bill-card-name">${escHtml(g.name)}</div>
@@ -202,6 +215,107 @@
     setHTML('user-list', html);
   }
 
+  // ── Profile Sheet ─────────────────────────────────────────────
+  let profilePhone = null, profileIsGuest = false;
+
+  async function openProfile(phone, isGuest) {
+    profilePhone   = phone;
+    profileIsGuest = isGuest;
+
+    const target = isGuest
+      ? allGuests.find(g => g.phone === phone)
+      : allUsers.find(u => u.phone === phone);
+    if (!target) return;
+
+    setText('profile-title', target.name);
+
+    // Meta line
+    const metaParts = [`<span>${Auth.formatPhone(phone)}</span>`];
+    if (!isGuest && target.venmo_handle) metaParts.push(`<span>@${escHtml(target.venmo_handle)}</span>`);
+    if (!isGuest && target.is_admin)     metaParts.push(`<span style="color:var(--accent);">Admin</span>`);
+    if (isGuest) metaParts.push(`<span class="badge badge-setup" style="font-size:10px;">No account</span>`);
+    setHTML('profile-meta', `<div class="bill-card-meta" style="margin:0;">${metaParts.join('')}</div>`);
+
+    setHTML('profile-body', '<div style="text-align:center;padding:24px 0;color:var(--text-muted);font-size:13px;">Loading…</div>');
+    openSheet('profile-backdrop', 'profile-sheet');
+
+    try {
+      const [billsRes, guestRowsRes, claimsRes] = await Promise.all([
+        db.from('bills').select('id, name, created_at, status').eq('owner_phone', phone).order('created_at', { ascending: false }),
+        db.from('guests').select('bill_id, joined_at').eq('phone', phone),
+        db.from('claims').select('bill_id, item_id').eq('guest_phone', phone),
+      ]);
+
+      const ownedBills    = billsRes.data || [];
+      const guestBillIds  = [...new Set((guestRowsRes.data || []).map(r => r.bill_id))];
+      const claimedBillIds = [...new Set((claimsRes.data || []).map(r => r.bill_id))];
+
+      // Bills they appear on (as guest) — fetch names for those not already in owned
+      const ownedIds = new Set(ownedBills.map(b => b.id));
+      const fetchIds = [...new Set([...guestBillIds, ...claimedBillIds])].filter(id => !ownedIds.has(id));
+      let guestBills = [];
+      if (fetchIds.length) {
+        const { data } = await db.from('bills').select('id, name, created_at, status').in('id', fetchIds).order('created_at', { ascending: false });
+        guestBills = data || [];
+      }
+
+      // Claim count per bill for summary
+      const claimsPerBill = {};
+      for (const c of (claimsRes.data || [])) {
+        claimsPerBill[c.bill_id] = (claimsPerBill[c.bill_id] || 0) + 1;
+      }
+
+      const billRow = b => {
+        const statusClass = b.status === 'closed' ? 'badge-closed' : 'badge-active';
+        const statusLabel = b.status === 'closed' ? 'Closed' : 'Open';
+        const claims = claimsPerBill[b.id];
+        return `
+          <a href="/bill.html?id=${b.id}" target="_blank" style="text-decoration:none;">
+            <div class="bill-card" style="margin-bottom:8px;">
+              <div class="bill-card-top">
+                <div style="min-width:0;">
+                  <div class="bill-card-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(b.name)}</div>
+                  <div class="bill-card-meta" style="margin-bottom:0;">
+                    <span>${formatDateShort(b.created_at)}</span>
+                    ${claims ? `<span>${claims} claim${claims !== 1 ? 's' : ''}</span>` : ''}
+                  </div>
+                </div>
+                <span class="badge ${statusClass}" style="font-size:10px;flex-shrink:0;">${statusLabel}</span>
+              </div>
+            </div>
+          </a>`;
+      };
+
+      let html = '';
+
+      if (ownedBills.length) {
+        html += `<div class="section-divider" style="margin-bottom:10px;"><h3 style="font-size:14px;">Bills Created <span style="font-weight:400;color:var(--text-muted);">(${ownedBills.length})</span></h3></div>`;
+        html += ownedBills.map(billRow).join('');
+      }
+
+      if (guestBills.length) {
+        html += `<div class="section-divider" style="margin-top:16px;margin-bottom:10px;"><h3 style="font-size:14px;">Appears On <span style="font-weight:400;color:var(--text-muted);">(${guestBills.length})</span></h3></div>`;
+        html += guestBills.map(billRow).join('');
+      }
+
+      if (!ownedBills.length && !guestBills.length) {
+        html = '<div class="empty" style="padding:24px 0;"><p>No bills found for this user.</p></div>';
+      }
+
+      setHTML('profile-body', html);
+    } catch (err) {
+      setHTML('profile-body', `<div class="error-state"><p>${escHtml(err?.message || 'Load failed')}</p></div>`);
+    }
+  }
+
+  $('profile-edit-btn').addEventListener('click', () => {
+    closeSheet('profile-backdrop', 'profile-sheet');
+    openEdit(profilePhone, profileIsGuest);
+  });
+  $('profile-close-btn').addEventListener('click',  () => closeSheet('profile-backdrop', 'profile-sheet'));
+  $('profile-backdrop').addEventListener('click',   () => closeSheet('profile-backdrop', 'profile-sheet'));
+
+  // ── Edit Sheet ─────────────────────────────────────────────────
   function openEdit(phone, isGuest) {
     editIsGuest = isGuest;
 
