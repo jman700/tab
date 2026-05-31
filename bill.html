@@ -303,13 +303,14 @@
     return fmtCurrency(amount, billCurrency);
   }
 
-  const billId = getBillIdFromUrl();
+  const billId   = getBillIdFromUrl();
+  const adminView = new URLSearchParams(window.location.search).get('admin') === '1';
   if (!billId) navigateTo('/dashboard.html');
 
   // ── Init ─────────────────────────────────────────────────
   async function init() {
     await loadAll();
-    await ensureJoined();
+    if (!adminView) await ensureJoined();
     render();
     setupCurrencyToggle();
     setupItemEdit();
@@ -425,7 +426,7 @@
       for (const p of (profiles || [])) payerProfiles[p.phone] = p;
     }
 
-    isOwner = bill.created_by_phone === user.phone;
+    isOwner = bill.created_by_phone === user.phone || adminView;
     myGuest = guests.find(g => g.phone === user.phone) || null;
 
     document.title = `Tab — ${bill.name}`;
@@ -479,7 +480,15 @@
   }
 
   function renderHeader() {
-    if (isOwner) show($('owner-banner'));
+    if (adminView) {
+      const banner = $('owner-banner');
+      banner.textContent = `Admin view — viewing as ${bill.created_by_phone}. Changes you make will affect this bill.`;
+      banner.style.background = 'var(--accent)';
+      banner.style.color = '#fff';
+      show(banner);
+    } else if (isOwner) {
+      show($('owner-banner'));
+    }
     setText('guest-count', guests.length);
     setText('bill-meta', `${formatDate(bill.created_at)} · ${guests.length} guest${guests.length !== 1 ? 's' : ''}`);
   }

@@ -270,7 +270,7 @@
         const statusLabel = b.status === 'closed' ? 'Closed' : 'Open';
         const claims = claimsPerBill[b.id];
         return `
-          <a href="/bill.html?id=${b.id}" target="_blank" style="text-decoration:none;">
+          <a href="/bill/${b.id}?admin=1" target="_blank" style="text-decoration:none;">
             <div class="bill-card" style="margin-bottom:8px;">
               <div class="bill-card-top">
                 <div style="min-width:0;">
