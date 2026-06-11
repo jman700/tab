@@ -86,7 +86,7 @@
 <div class="sheet" id="expense-sheet" style="display:none;">
   <div class="sheet-handle"></div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-    <h2 style="margin:0;">Add Expense</h2>
+    <h2 style="margin:0;" id="expense-sheet-title">Add Expense</h2>
     <div style="display:flex;gap:8px;align-items:center;">
       <button class="btn btn-secondary btn-sm" id="scan-receipt-btn" style="display:inline-flex;align-items:center;gap:5px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>Scan</button>
       <button class="btn btn-ghost btn-sm" id="close-expense-btn">✕</button>
@@ -244,6 +244,37 @@
     }
 
     await loadGroup();
+    subscribeRealtime();
+  }
+
+  // ── Realtime — keep the group live across members ──────────
+  let realtimeTimer = null;
+  function onGroupDataChange() {
+    // Debounce bursts (e.g. expense + splits inserted together)
+    clearTimeout(realtimeTimer);
+    realtimeTimer = setTimeout(async () => {
+      await loadExpenses();
+      const balancesVisible = $('balances-tab').style.display !== 'none';
+      if (balancesVisible) await loadBalances();
+      else balancesLoaded = false; // force fresh load next time the tab opens
+    }, 400);
+  }
+
+  async function onMembersChange() {
+    const { data } = await Groups.getMembers(groupId);
+    members = data || [];
+    setText('group-meta', `${members.length} member${members.length !== 1 ? 's' : ''}`);
+    renderMembers();
+    onGroupDataChange();
+  }
+
+  function subscribeRealtime() {
+    db.channel(`group-${groupId}`)
+      .on('postgres_changes', { event: '*', schema: 'tab', table: 'expenses',      filter: `group_id=eq.${groupId}` }, onGroupDataChange)
+      .on('postgres_changes', { event: '*', schema: 'tab', table: 'settlements',   filter: `group_id=eq.${groupId}` }, onGroupDataChange)
+      .on('postgres_changes', { event: '*', schema: 'tab', table: 'bills',         filter: `group_id=eq.${groupId}` }, onGroupDataChange)
+      .on('postgres_changes', { event: '*', schema: 'tab', table: 'group_members', filter: `group_id=eq.${groupId}` }, onMembersChange)
+      .subscribe();
   }
 
   async function loadGroup() {
@@ -479,7 +510,10 @@
     }
   }
 
+  let expensesCache = [];
+
   function renderExpenses(expenses, bills = []) {
+    expensesCache = expenses;
     // Merge expenses and bills, sorted newest first
     const expItems  = expenses.map(e => ({ ...e, _type: 'expense', _date: e.expense_date || e.created_at }));
     const billItems = bills.map(b => ({ ...b, _type: 'bill', _date: b.created_at }));
@@ -498,6 +532,28 @@
     setHTML('expenses-list', combined.map(item =>
       item._type === 'bill' ? renderBillCard(item) : renderExpenseCard(item)
     ).join(''));
+
+    // Wire edit/delete buttons on expense cards
+    $$('.expense-edit-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const exp = expensesCache.find(x => x.id === btn.dataset.expenseId);
+        if (exp) openEditExpense(exp);
+      });
+    });
+    $$('.expense-delete-btn').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const exp = expensesCache.find(x => x.id === btn.dataset.expenseId);
+        if (!exp) return;
+        if (!confirm(`Delete "${exp.description}" (${fmtCurrency(exp.amount, exp.currency)})?\n\nThis removes it from everyone's balances.`)) return;
+        const { error } = await Groups.deleteExpense(exp.id);
+        if (error) return showToast('Could not delete expense', 'error');
+        balancesLoaded = false;
+        await loadExpenses();
+        showToast('Expense deleted', 'success');
+      });
+    });
 
     // Wire unlink buttons
     $$('.unlink-bill-btn').forEach(btn => {
@@ -559,6 +615,7 @@
     const mySplit   = (exp.splits || []).find(s => s.phone === user.phone);
     const myAmt     = mySplit ? fmtCurrency(mySplit.amount, exp.currency) : null;
     const iAmPayer  = exp.paid_by === user.phone;
+    const canManage = (iAmPayer || group?.created_by === user.phone) && !group?.closed_at;
 
     const splitLabel = exp.split_method === 'equal'      ? 'Equal split'
                      : exp.split_method === 'percentage'  ? 'By percentage'
@@ -566,6 +623,12 @@
                      : exp.split_method === 'shares'      ? 'By shares'
                      : exp.split_method === 'adjustment'  ? 'By adjustment'
                      : exp.split_method;
+
+    const manageBtns = canManage ? `
+      <span style="display:flex;gap:4px;flex-shrink:0;">
+        <button class="btn btn-ghost btn-sm expense-edit-btn" data-expense-id="${escHtml(exp.id)}" style="font-size:11px;padding:2px 8px;">Edit</button>
+        <button class="btn btn-ghost btn-sm expense-delete-btn" data-expense-id="${escHtml(exp.id)}" style="font-size:11px;padding:2px 8px;color:var(--red,#c0392b);">Delete</button>
+      </span>` : '';
 
     return `
       <div class="bill-card fade-up" style="cursor:default;">
@@ -578,11 +641,12 @@
           <span>${splitLabel}</span>
           <span>${formatDateShort(exp.expense_date || exp.created_at)}</span>
         </div>
-        ${myAmt ? `
-        <div class="bill-card-footer">
-          <span class="bill-card-yours">
-            ${iAmPayer ? "You paid · you're owed back" : `Your share: ${myAmt}`}
+        ${(myAmt || manageBtns) ? `
+        <div class="bill-card-footer" style="align-items:center;">
+          <span class="bill-card-yours" style="flex:1;">
+            ${myAmt ? (iAmPayer ? "You paid · you're owed back" : `Your share: ${myAmt}`) : ''}
           </span>
+          ${manageBtns}
         </div>` : ''}
       </div>
     `;
@@ -994,7 +1058,12 @@
     renderSplitInputs();
   });
 
+  let editingExpenseId = null;
+
   $('add-expense-btn').addEventListener('click', () => {
+    editingExpenseId = null;
+    setText('expense-sheet-title', 'Add Expense');
+    $('save-expense-btn').textContent = 'Add Expense';
     populateCurrencySelect();
     populatePaidBySelect();
     activeSplitMethod = 'equal';
@@ -1015,6 +1084,47 @@
     openSheet('expense-backdrop', 'expense-sheet');
     setTimeout(() => $('exp-description').focus(), 320);
   });
+
+  function openEditExpense(exp) {
+    editingExpenseId = exp.id;
+    setText('expense-sheet-title', 'Edit Expense');
+    $('save-expense-btn').textContent = 'Save Changes';
+
+    populateCurrencySelect();
+    populatePaidBySelect();
+    $('exp-description').value = exp.description;
+    $('exp-amount').value      = exp.amount;
+    $('exp-currency').value    = exp.currency || 'USD';
+    $('exp-paid-by').value     = exp.paid_by;
+    $('exp-note').value        = exp.note || '';
+    $('exp-date').value        = (exp.expense_date || exp.created_at || '').slice(0, 10);
+    $('exp-scan-input').value  = '';
+    $('exp-scanning-state').style.display = 'none';
+    $('exp-items-preview').style.display  = 'none';
+    scannedItems = []; claimsByUnit = {}; claimActivePhone = user.phone;
+
+    // Equal splits stay equal; everything else loads as exact amounts (preserves data, easy to tweak)
+    activeSplitMethod = exp.split_method === 'equal' ? 'equal' : 'exact';
+    $$('[data-method]').forEach(b => b.classList.toggle('active', b.dataset.method === activeSplitMethod));
+
+    renderParticipants();
+    // Restrict participants to the people on the saved splits
+    const splitPhones = new Set((exp.splits || []).map(s => s.phone));
+    $$('#participant-list .participant-cb').forEach(cb => {
+      if (!cb.disabled) cb.checked = splitPhones.has(cb.dataset.phone);
+    });
+
+    renderSplitInputs();
+    if (activeSplitMethod === 'exact') {
+      $$('.split-exact-input').forEach(el => {
+        const s = (exp.splits || []).find(x => x.phone === el.dataset.phone);
+        el.value = s ? s.amount : '0.00';
+      });
+      if (typeof updateExactNote === 'function') updateExactNote();
+    }
+
+    openSheet('expense-backdrop', 'expense-sheet');
+  }
 
   $('close-expense-btn').addEventListener('click', () => closeSheet('expense-backdrop', 'expense-sheet'));
   $('expense-backdrop').addEventListener('click', () => closeSheet('expense-backdrop', 'expense-sheet'));
@@ -1137,25 +1247,25 @@
     btn.textContent = 'Saving…';
 
     try {
-      const { error } = await Groups.addExpense(
-        groupId,
-        { description, amount, currency, paid_by, split_method: activeSplitMethod, note, expense_date },
-        splits
-      );
+      const expenseData = { description, amount, currency, paid_by, split_method: activeSplitMethod, note, expense_date };
+      const { error } = editingExpenseId
+        ? await Groups.updateExpense(editingExpenseId, expenseData, splits)
+        : await Groups.addExpense(groupId, expenseData, splits);
 
       if (error) {
-        console.error('addExpense failed:', error);
+        console.error('saveExpense failed:', error);
         showToast(`Could not save expense: ${error?.message || error?.code || 'unknown'}`, 'error', 5000);
         return;
       }
 
       closeSheet('expense-backdrop', 'expense-sheet');
-      showToast('Expense added', 'success');
+      showToast(editingExpenseId ? 'Expense updated' : 'Expense added', 'success');
+      editingExpenseId = null;
       balancesLoaded = false;
       await loadExpenses();
     } finally {
       btn.disabled    = false;
-      btn.textContent = 'Add Expense';
+      btn.textContent = editingExpenseId ? 'Save Changes' : 'Add Expense';
     }
   });
 
@@ -1197,8 +1307,8 @@
              data-to="${escHtml(t.to)}"
              data-to-name="${escHtml(t.toName)}"
              data-amount="${t.amount}"
-             style="cursor:${isYouPaying ? 'pointer' : 'default'};"
-             ${isYouPaying ? 'onclick="openSettleSheet(this)"' : ''}>
+             style="cursor:${isYouPaying || isYouReceiving ? 'pointer' : 'default'};"
+             ${isYouPaying || isYouReceiving ? 'onclick="openSettleSheet(this)"' : ''}>
           <div class="bill-card-top">
             <div class="bill-card-name">${escHtml(t.fromName)} → ${escHtml(t.toName)}</div>
             <span style="font-size:15px;font-weight:600;color:var(--accent);">${fmtCurrency(t.amount, 'USD')}</span>
@@ -1216,8 +1326,13 @@
                data-amount="${t.amount}"
                onclick="event.stopPropagation()">Mark Settled</button>
           </div>` : isYouReceiving ? `
-          <div class="bill-card-meta" style="margin-top:6px;">
-            <span style="color:var(--text-muted);">Awaiting payment from ${escHtml(t.fromName)}</span>
+          <div class="bill-card-footer" style="gap:8px;margin-top:8px;align-items:center;">
+            <span style="flex:1;font-size:13px;color:var(--text-muted);">Awaiting payment from ${escHtml(t.fromName)}</span>
+            <button class="btn btn-secondary btn-sm mark-settled-inline-btn"
+               data-from="${escHtml(t.from)}" data-from-name="${escHtml(t.fromName)}"
+               data-to="${escHtml(t.to)}"     data-to-name="${escHtml(t.toName)}"
+               data-amount="${t.amount}"
+               onclick="event.stopPropagation()">They paid me</button>
           </div>` : ''}
         </div>
       `;
@@ -1237,28 +1352,30 @@
 
   function openSettleSheet(card) {
     const from = card.dataset.from;
-    if (from !== user.phone) {
-      showToast(`${card.dataset.fromName} needs to record this payment`, 'error');
+    const to   = card.dataset.to;
+    if (from !== user.phone && to !== user.phone) {
+      showToast(`Only ${card.dataset.fromName} or ${card.dataset.toName} can record this payment`, 'error');
       return;
     }
 
     pendingSettle = {
       from:     from,
       fromName: card.dataset.fromName,
-      to:       card.dataset.to,
+      to:       to,
       toName:   card.dataset.toName,
       amount:   parseFloat(card.dataset.amount),
     };
 
-    const isYouPaying = true;
+    const isYouPaying = from === user.phone;
     setText('settle-description',
       isYouPaying
         ? `You pay ${pendingSettle.toName} ${fmtCurrency(pendingSettle.amount, 'USD')}`
-        : `${pendingSettle.fromName} pays ${pendingSettle.toName} ${fmtCurrency(pendingSettle.amount, 'USD')}`
+        : `${pendingSettle.fromName} paid you ${fmtCurrency(pendingSettle.amount, 'USD')}`
     );
 
-    activeSettleMethod = 'venmo';
-    $$('[data-settle-method]').forEach(b => b.classList.toggle('active', b.dataset.settleMethod === 'venmo'));
+    // Receiver recording a payment: Venmo deep link doesn't apply — default to cash
+    activeSettleMethod = isYouPaying ? 'venmo' : 'cash';
+    $$('[data-settle-method]').forEach(b => b.classList.toggle('active', b.dataset.settleMethod === activeSettleMethod));
     renderVenmoButton();
     $('settle-note').value = '';
     openSheet('settle-backdrop', 'settle-sheet');

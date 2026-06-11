@@ -158,6 +158,20 @@ const Groups = (() => {
     return { data: true };
   }
 
+  async function updateExpense(expenseId, expense, splits) {
+    // expense: { description, amount, currency, paid_by, split_method, note, expense_date }
+    const { error: e1 } = await db.from('expenses').update(expense).eq('id', expenseId);
+    if (e1) return { error: e1 };
+
+    const { error: e2 } = await db.from('expense_splits').delete().eq('expense_id', expenseId);
+    if (e2) return { error: e2 };
+
+    const splitRows = splits.map(s => ({ expense_id: expenseId, phone: s.phone, amount: s.amount }));
+    const { error: e3 } = await db.from('expense_splits').insert(splitRows);
+    if (e3) return { error: e3 };
+    return { data: true };
+  }
+
   async function getBillsForGroup(groupId) {
     const { data: bills, error: e1 } = await db
       .from('bills')
@@ -299,6 +313,7 @@ const Groups = (() => {
     addExpense,
     getExpenses,
     deleteExpense,
+    updateExpense,
     getBillsForGroup,
     addSettlement,
     getSettlements,
