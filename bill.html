@@ -9,7 +9,7 @@
   <meta property="og:description" content="Tap what you had and see exactly what you owe." />
   <meta property="og:type"        content="website" />
   <meta name="theme-color"        content="#B8872A" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 36'><rect x='1.5' y='1.5' width='27' height='30' rx='3' fill='%23B8872A' fill-opacity='0.15' stroke='%23B8872A' stroke-width='2'/><path d='M7 12h16M7 18h16M7 24h10' stroke='%23B8872A' stroke-width='2.5' stroke-linecap='round'/></svg>" />
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
@@ -37,7 +37,7 @@
 
   <!-- Owner banner -->
   <div class="owner-banner hidden" id="owner-banner">
-    ✦ You created this bill — only you can manage guests and close it.
+    You created this bill — only you can manage guests and close it.
   </div>
 
   <!-- Owner quick actions (add guest / pass phone) -->
@@ -151,7 +151,7 @@
   <div class="sheet-handle"></div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
     <h2 style="margin:0;">Bill Summary</h2>
-    <button class="btn btn-secondary btn-sm hidden" id="save-breakdown-btn" style="font-size:12px;padding:5px 11px;">⬇ Save</button>
+    <button class="btn btn-secondary btn-sm hidden" id="save-breakdown-btn" style="font-size:12px;padding:5px 11px;display:inline-flex;align-items:center;gap:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>Save</button>
   </div>
   <p class="sheet-meta" id="summary-meta"></p>
   <!-- Tabs -->
@@ -563,6 +563,7 @@
     }
 
     let unclaimedCount = 0;
+    let unclaimedValue = 0;
 
     const activePhone = kioskGuest ? kioskGuest.phone : user.phone;
 
@@ -580,8 +581,8 @@
         const isEmpty    = unitClaims.length === 0;
         const isMine     = unitClaims.some(c => c.guest_phone === activePhone);
 
-        if (isEmpty) unclaimedCount++;
         const effectivePrice    = item.price - (item.discount || 0);
+        if (isEmpty) { unclaimedCount++; unclaimedValue += effectivePrice; }
         const totalUnitHeads    = unitClaims.reduce((sum, x) => {
           const g = guests.find(gg => gg.phone === x.guest_phone);
           return sum + (g?.headcount || 1);
@@ -645,7 +646,15 @@
     }).join('');
 
     const notice = $('unclaimed-notice');
-    if (notice) notice.textContent = unclaimedCount > 0 ? `${unclaimedCount} unclaimed` : '';
+    if (notice) {
+      if (unclaimedCount > 0) {
+        notice.textContent = `${unclaimedCount} unclaimed · ${display(unclaimedValue)}`;
+        notice.style.color = 'var(--accent)';
+        notice.style.fontWeight = '600';
+      } else {
+        notice.textContent = '';
+      }
+    }
   }
 
   function renderConfirmBanner() {
@@ -1425,7 +1434,32 @@
       `;
     }).join('');
 
-    setHTML('summary-list', summaryList);
+    // Unclaimed money row — make missing claims impossible to miss
+    let unclaimedRow = '';
+    if (!allClaimed && totalUnits > 0) {
+      let unclaimedUnits = 0, unclaimedRaw = 0;
+      const claimedKeys = new Set(claims.map(c => `${c.item_id}-${c.unit_index}`));
+      for (const it of items) {
+        for (let u = 0; u < it.quantity; u++) {
+          if (!claimedKeys.has(`${it.id}-${u}`)) {
+            unclaimedUnits++;
+            unclaimedRaw += it.price - (it.discount || 0);
+          }
+        }
+      }
+      const unclaimedAmt = showDual ? fmtCurrency(unclaimedRaw * exchangeRate, 'USD') : display(unclaimedRaw);
+      unclaimedRow = `
+        <div class="summary-row" style="background:rgba(184,135,42,0.07);border:1px dashed rgba(184,135,42,0.45);border-radius:var(--radius-sm);padding:10px 12px;margin-top:2px;">
+          <div class="summary-avatar" style="background:var(--accent-light);color:var(--accent);border:2px dashed rgba(184,135,42,0.45);font-size:15px;">?</div>
+          <div class="summary-info">
+            <div class="summary-name" style="color:var(--accent);">Unclaimed</div>
+            <div class="summary-pct">${unclaimedUnits} item${unclaimedUnits !== 1 ? 's' : ''} still need${unclaimedUnits === 1 ? 's' : ''} an owner</div>
+          </div>
+          <div class="summary-amount" style="color:var(--accent);text-align:right;">${unclaimedAmt}</div>
+        </div>`;
+    }
+
+    setHTML('summary-list', summaryList + unclaimedRow);
 
     const dualAmt = amount => {
       if (!showDual) return display(amount);

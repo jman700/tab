@@ -314,6 +314,7 @@ h3 { font-size: 18px; }
   background: var(--accent-light);
 }
 .upload-icon { font-size: 32px; margin-bottom: 10px; }
+.upload-icon svg { width: 34px; height: 34px; color: var(--accent); }
 .upload-area p    { font-size: 15px; color: var(--text-2); margin-bottom: 4px; }
 .upload-area span { font-size: 13px; color: var(--text-muted); }
 .upload-preview {
@@ -676,6 +677,17 @@ h3 { font-size: 18px; }
   transition: transform 0.3s var(--ease);
 }
 .sheet.visible     { transform: translateY(0); }
+/* Desktop: center sheets as floating panels instead of full-width drawers */
+@media (min-width: 700px) {
+  .sheet {
+    left: 50%; right: auto; bottom: 32px;
+    width: 100%; max-width: 560px;
+    border-radius: var(--radius-lg);
+    transform: translate(-50%, calc(100% + 32px));
+    max-height: calc(100vh - 64px);
+  }
+  .sheet.visible { transform: translate(-50%, 0); }
+}
 .sheet-handle {
   width: 36px; height: 4px;
   border-radius: 2px;
@@ -866,6 +878,7 @@ h3 { font-size: 18px; }
 /* ── Empty State ─────────────────────────────────────────────── */
 .empty { text-align: center; padding: 48px 24px; color: var(--text-muted); }
 .empty-icon { font-size: 36px; margin-bottom: 12px; }
+.empty-icon svg { width: 38px; height: 38px; color: var(--text-muted); opacity: 0.7; }
 .empty h3 { font-size: 16px; color: var(--text-2); margin-bottom: 6px; }
 .empty p  { font-size: 14px; line-height: 1.5; }
 
