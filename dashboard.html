@@ -254,6 +254,18 @@
                      : bill.status === 'setup'  ? 'Setting up'
                      : 'Closed';
 
+    // Claim progress (active bills only)
+    const totalUnits   = items.reduce((s, i) => s + (i.quantity || 1), 0);
+    const claimedUnits = new Set(allClaims.map(c => `${c.item_id}-${c.unit_index}`)).size;
+    const pct          = totalUnits > 0 ? Math.min(100, claimedUnits / totalUnits * 100) : 0;
+    const progressHtml = (bill.status === 'active' && totalUnits > 0) ? `
+        <div style="display:flex;align-items:center;gap:8px;margin:10px 0 2px;">
+          <div style="flex:1;height:4px;border-radius:2px;background:var(--surface-2);overflow:hidden;">
+            <div style="height:100%;width:${pct}%;border-radius:2px;background:${pct >= 100 ? 'var(--green)' : 'var(--accent)'};transition:width 0.3s;"></div>
+          </div>
+          <span style="font-size:11px;color:${pct >= 100 ? 'var(--green)' : 'var(--text-muted)'};flex-shrink:0;">${pct >= 100 ? 'All claimed' : `${claimedUnits}/${totalUnits} claimed`}</span>
+        </div>` : '';
+
     return `
       <div class="bill-card fade-up" data-id="${bill.id}" data-status="${bill.status}">
         <div class="bill-card-top">
@@ -265,6 +277,7 @@
           <span>${guestCount} guest${guestCount !== 1 ? 's' : ''}</span>
           ${isOwner ? '<span>You created this</span>' : ''}
         </div>
+        ${progressHtml}
         <div class="bill-card-footer">
           <span class="bill-card-yours">
             ${myShare > 0 ? `Your share: ${fmtCurrency(myShare, bill.currency || 'USD')}` : '&nbsp;'}

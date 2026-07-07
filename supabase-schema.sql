@@ -205,6 +205,9 @@ CREATE INDEX IF NOT EXISTS idx_bills_group_id           ON tab.bills(group_id);
 -- expense_date column (if expenses table existed before this migration)
 ALTER TABLE tab.expenses ADD COLUMN IF NOT EXISTS expense_date DATE;
 
+-- expense category (run 2026-07-07 via Management API)
+ALTER TABLE tab.expenses ADD COLUMN IF NOT EXISTS category TEXT;
+
 -- ── Discounts & multi-tax (migration) ────────────────────────
 ALTER TABLE tab.bills  ADD COLUMN IF NOT EXISTS discount_amount    NUMERIC DEFAULT 0;
 ALTER TABLE tab.bills  ADD COLUMN IF NOT EXISTS tax_items          JSONB   DEFAULT '[]';

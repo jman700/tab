@@ -142,6 +142,18 @@
   <div id="split-inputs" style="margin-top:8px;margin-bottom:4px;"></div>
 
   <div class="field">
+    <label>Category <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;">(optional)</span></label>
+    <div class="toggle-group" id="exp-category-group" style="margin-top:6px;flex-wrap:wrap;">
+      <button type="button" class="toggle-btn" data-category="food">Food &amp; Drink</button>
+      <button type="button" class="toggle-btn" data-category="groceries">Groceries</button>
+      <button type="button" class="toggle-btn" data-category="transport">Transport</button>
+      <button type="button" class="toggle-btn" data-category="lodging">Lodging</button>
+      <button type="button" class="toggle-btn" data-category="entertainment">Fun</button>
+      <button type="button" class="toggle-btn" data-category="other">Other</button>
+    </div>
+  </div>
+
+  <div class="field">
     <label for="exp-note">Note <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;">(optional)</span></label>
     <input class="input" id="exp-note" type="text" placeholder="Optional note…" autocomplete="off" />
   </div>
@@ -640,6 +652,7 @@
           <span>${escHtml(payerName)} paid</span>
           <span>${splitLabel}</span>
           <span>${formatDateShort(exp.expense_date || exp.created_at)}</span>
+          ${exp.category ? `<span style="color:var(--accent);font-weight:500;">${escHtml(CATEGORY_LABELS[exp.category] || exp.category)}</span>` : ''}
         </div>
         ${(myAmt || manageBtns) ? `
         <div class="bill-card-footer" style="align-items:center;">
@@ -1060,10 +1073,28 @@
 
   let editingExpenseId = null;
 
+  const CATEGORY_LABELS = {
+    food: 'Food & Drink', groceries: 'Groceries', transport: 'Transport',
+    lodging: 'Lodging', entertainment: 'Fun', other: 'Other',
+  };
+  let activeCategory = null;
+
+  function setActiveCategory(cat) {
+    activeCategory = cat;
+    $$('#exp-category-group [data-category]').forEach(b =>
+      b.classList.toggle('active', b.dataset.category === cat));
+  }
+
+  $$('#exp-category-group [data-category]').forEach(btn => {
+    btn.addEventListener('click', () =>
+      setActiveCategory(activeCategory === btn.dataset.category ? null : btn.dataset.category));
+  });
+
   $('add-expense-btn').addEventListener('click', () => {
     editingExpenseId = null;
     setText('expense-sheet-title', 'Add Expense');
     $('save-expense-btn').textContent = 'Add Expense';
+    setActiveCategory(null);
     populateCurrencySelect();
     populatePaidBySelect();
     activeSplitMethod = 'equal';
@@ -1098,6 +1129,7 @@
     $('exp-paid-by').value     = exp.paid_by;
     $('exp-note').value        = exp.note || '';
     $('exp-date').value        = (exp.expense_date || exp.created_at || '').slice(0, 10);
+    setActiveCategory(exp.category || null);
     $('exp-scan-input').value  = '';
     $('exp-scanning-state').style.display = 'none';
     $('exp-items-preview').style.display  = 'none';
@@ -1247,7 +1279,7 @@
     btn.textContent = 'Saving…';
 
     try {
-      const expenseData = { description, amount, currency, paid_by, split_method: activeSplitMethod, note, expense_date };
+      const expenseData = { description, amount, currency, paid_by, split_method: activeSplitMethod, note, expense_date, category: activeCategory };
       const { error } = editingExpenseId
         ? await Groups.updateExpense(editingExpenseId, expenseData, splits)
         : await Groups.addExpense(groupId, expenseData, splits);
