@@ -5,7 +5,7 @@ Real-time bill splitter. Upload a receipt → Claude Vision parses items → sha
 
 ## Stack
 - Frontend: Vanilla HTML/CSS/JS, no framework
-- Database + Realtime: Supabase (schema: `tab`, project: `fcscdimjhycxgstnzucd.supabase.co`)
+- Database + Realtime: Supabase (schema: `tab`, project: `xittuxwilxmzzawjdivd.supabase.co` — the shared "JSE" project, migrated 2026-07-19 off the free-tier `fcscdimjhycxgstnzucd` project which kept auto-suspending from inactivity. Old project kept intact as a backup, not in active use.)
 - Hosting: Vercel (auto-deploy from main)
 - OCR: Claude Vision API via Vercel serverless (`api/parse-receipt.js`)
 - Storage: Supabase `receipts` bucket (public)

@@ -44,9 +44,11 @@
 - `supabase-schema.sql` — full schema + all migration comments
 
 ## Supabase project
-- URL: `https://fcscdimjhycxgstnzucd.supabase.co`
-- Schema: `tab` (all tables prefixed)
+- URL: `https://xittuxwilxmzzawjdivd.supabase.co` (the shared "JSE" project — migrated here 2026-07-19)
+- Schema: `tab` (all tables prefixed) — added to this project's PostgREST exposed schemas and `supabase_realtime` publication
 - Storage bucket: `receipts` (public)
+- Old project `fcscdimjhycxgstnzucd` (free tier, kept auto-suspending from inactivity) is left intact as an untouched backup — not deleted, just no longer in use. Full data + storage migrated across, verified row-count and byte-for-byte matches before cutover.
+- Fixed during migration: `tab.expenses.split_method` CHECK constraint on the old project only allowed `equal/percentage/exact`, silently excluding `shares/adjustment/claim` which the group.html UI already offered. Widened on the new project.
 
 ## All SQL migrations run
 ```sql

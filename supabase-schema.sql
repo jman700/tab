@@ -4,6 +4,18 @@
 --
 -- Uses a dedicated "tab" schema so this app can share a
 -- Supabase project with other tools without table name conflicts.
+--
+-- Live on project xittuxwilxmzzawjdivd ("JSE", shared) as of
+-- 2026-07-19 — migrated off the free-tier fcscdimjhycxgstnzucd
+-- project, which kept auto-suspending from inactivity.
+--
+-- NOTE: this file had drifted from the live schema before the
+-- migration (group_members/expense_splits lost their `id` column
+-- in favor of composite PKs; groups.invite_token became TEXT/hex
+-- instead of UUID; expenses.split_method's CHECK was missing
+-- shares/adjustment/claim). The migration rebuilt from live
+-- introspection, not this file — treat this file as reference
+-- documentation, not the literal source of truth for a fresh install.
 -- ============================================================
 
 -- ── Schema ──────────────────────────────────────────────────
